@@ -119,6 +119,10 @@ jq -n \
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id started pane=$pane worktree=$worktree_path" >> "$events_log"
 
 nohup "$script_dir/watch-pup.sh" "$task_id" >/dev/null 2>&1 &
+watcher_pid=$!
 disown
 
-echo "Pup '$task_id' lanzado. worktree=$worktree_path pane=$pane"
+tmp_file=$(mktemp)
+jq --arg watcher_pid "$watcher_pid" '.watcher_pid = ($watcher_pid | tonumber)' "$task_file" > "$tmp_file" && mv "$tmp_file" "$task_file"
+
+echo "Pup '$task_id' lanzado. worktree=$worktree_path pane=$pane watcher_pid=$watcher_pid"
