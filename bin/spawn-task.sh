@@ -53,7 +53,7 @@ worktree_path=$(echo "$create_json" | jq -r '.result.worktree.path')
 # El pane recién creado puede tardar un instante en estar listo.
 started=0
 for attempt in 1 2 3 4 5; do
-  if herdr agent start "$task_id" --kind claude --pane "$pane" >/dev/null 2>&1; then
+  if herdr agent start "$task_id" --kind claude --pane "$pane" -- --permission-mode acceptEdits >/dev/null 2>&1; then
     started=1
     break
   fi
@@ -64,7 +64,23 @@ if [[ "$started" -ne 1 ]]; then
   exit 1
 fi
 
-herdr agent prompt "$pane" "$prompt" >/dev/null
+# El pane puede reportarse "idle" e interactive_ready=true antes de que la UI
+# de Claude Code haya terminado de renderizar y esté realmente aceptando
+# teclas: un envío inmediato del prompt se puede perder en silencio. Usamos
+# --wait --until working para confirmar que el prompt realmente disparó al
+# worker, y reintentamos si no.
+prompted=0
+for attempt in 1 2 3 4 5; do
+  if herdr agent prompt "$pane" "$prompt" --wait --until working --timeout 5000 >/dev/null 2>&1; then
+    prompted=1
+    break
+  fi
+  sleep 1
+done
+if [[ "$prompted" -ne 1 ]]; then
+  echo "error: el prompt no llegó a arrancar al worker en el pane $pane tras varios intentos" >&2
+  exit 1
+fi
 
 created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 jq -n \
