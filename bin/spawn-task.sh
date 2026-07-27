@@ -50,6 +50,22 @@ pane=$(echo "$create_json" | jq -r '.result.root_pane.pane_id')
 workspace=$(echo "$create_json" | jq -r '.result.workspace.workspace_id')
 worktree_path=$(echo "$create_json" | jq -r '.result.worktree.path')
 
+# Si el repo destino trae su propia infraestructura de conocimiento/memoria
+# (por convención, no específico de ningún proyecto), se lo indicamos al
+# worker en el propio prompt en vez de tocar el repo real.
+context_preamble=""
+if [[ -f "$worktree_path/open-knowledge/map.md" ]]; then
+  context_preamble+="Antes de nada, lee open-knowledge/map.md en la raíz de este repo: contiene las reglas no negociables y el enrutador de tareas de este proyecto. Sigue esas reglas y consulta solo los documentos que ese mapa te indique para tu tarea concreta.
+
+"
+fi
+if [[ -f "$worktree_path/.engram/config.json" ]]; then
+  context_preamble+="Este repo usa Engram para memoria persistente entre sesiones. Antes de empezar, ejecuta 'engram search <tema relevante>' para ver si hay contexto de sesiones anteriores. Al terminar cambios significativos, ejecuta 'engram save <título> <resumen>' con lo aprendido o decidido (nunca guardes secretos, tokens ni credenciales).
+
+"
+fi
+full_prompt="${context_preamble}${prompt}"
+
 # El pane recién creado puede tardar un instante en estar listo.
 started=0
 for attempt in 1 2 3 4 5; do
@@ -71,7 +87,7 @@ fi
 # worker, y reintentamos si no.
 prompted=0
 for attempt in 1 2 3 4 5; do
-  if herdr agent prompt "$pane" "$prompt" --wait --until working --timeout 5000 >/dev/null 2>&1; then
+  if herdr agent prompt "$pane" "$full_prompt" --wait --until working --timeout 5000 >/dev/null 2>&1; then
     prompted=1
     break
   fi
@@ -93,9 +109,11 @@ jq -n \
   --arg lead_pane "$lead_pane" \
   --arg created_at "$created_at" \
   --arg prompt "$prompt" \
+  --arg context_preamble "$context_preamble" \
   '{task_id: $task_id, repo: $repo, branch: $branch, worktree_path: $worktree_path,
     workspace_id: $workspace, pane_id: $pane, lead_pane_id: $lead_pane,
-    status: "started", created_at: $created_at, prompt: $prompt}' \
+    status: "started", created_at: $created_at, prompt: $prompt,
+    context_preamble: $context_preamble}' \
   > "$task_file"
 
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id started pane=$pane worktree=$worktree_path" >> "$events_log"

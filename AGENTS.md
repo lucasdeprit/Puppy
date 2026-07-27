@@ -39,20 +39,43 @@ cumplir, así que cúmplelas por disciplina:
 
 ## Comandos
 
-- `bin/spawn-task.sh <task-id> <repo-path> <branch> <prompt...>` — crea el
-  worktree, arranca el worker, le manda el prompt, y lanza el watcher en
-  background.
+Hay un dispatcher global `lead` (symlink en `~/.local/bin/lead` → `bin/lead`,
+llamable desde cualquier directorio) que envuelve todo lo de abajo:
+`lead spawn|pr|rm|supervise|ls|status`.
+
+- `bin/spawn-task.sh <task-id> <repo-path> <branch> <prompt...>` (`lead spawn`)
+  — crea el worktree, arranca el worker, le manda el prompt, y lanza el
+  watcher en background. Si el repo destino tiene `open-knowledge/map.md`
+  y/o `.engram/config.json` (por convención, cualquier repo que los tenga,
+  no algo específico de un proyecto), antepone automáticamente al prompt
+  la instrucción de leer ese mapa y/o usar Engram — sin tocar el repo real.
 - `bin/watch-task.sh <task-id>` — normalmente no se llama a mano; lo lanza
   `spawn-task.sh`. Espera a que el worker llegue a done/blocked/unknown,
   registra el evento y avisa al lead.
-- `bin/supervise.sh [task-id ...]` — bloquea (sondeando, no con `wait -n`)
-  hasta que alguna tarea indicada (o todas las que sigan "started") resuelva.
-- `bin/open-pr.sh <task-id> [-- <args extra de gh pr create>]` — pushea la
-  rama de la tarea y abre un PR con `gh`. Flujo por defecto para
-  incorporar cambios.
-- `bin/remove-worktree.sh <task-id> [--force]` — borra el worktree de una
-  tarea, avisando primero si hay trabajo sin guardar. Solo úsalo cuando
-  haya una decisión explícita de descartar la rama (ver regla 3 arriba).
+- `bin/supervise.sh [task-id ...]` (`lead supervise`) — bloquea (sondeando,
+  no con `wait -n`) hasta que alguna tarea indicada (o todas las que sigan
+  "started") resuelva.
+- `bin/open-pr.sh <task-id> [-- <args extra de gh pr create>]` (`lead pr`)
+  — pushea la rama de la tarea y abre un PR con `gh`. Flujo por defecto
+  para incorporar cambios.
+- `bin/remove-worktree.sh <task-id> [--force]` (`lead rm`) — borra el
+  worktree de una tarea, avisando primero si hay trabajo sin guardar.
+  Solo úsalo cuando haya una decisión explícita de descartar la rama (ver
+  regla 3 arriba).
+- `lead ls` / `lead status <task-id>` — listar tareas registradas y ver la
+  metadata completa de una.
+
+## Repos con su propio ecosistema agéntico (p. ej. burmuin)
+
+Algunos repos ya tienen su propio flujo de agentes establecido (p. ej.
+`~/development/nextjs/burmuin/burmuin` usa OpenCode + Engram + `open-knowledge/`,
+ver su `open-knowledge/decisions/adr-0001-agentic-workflow.md` y
+`.opencode/rules.md`). `herdr-lead` no sustituye ni modifica ese flujo — es
+una herramienta aparte y genérica. Cuando se lanza una tarea sobre uno de
+esos repos, se aprovecha lo que ya existe (open-knowledge, Engram) vía el
+prompt, sin tocar la configuración del proyecto ni sus agentes propios
+(`.opencode/`). El flujo "legacy" de esos repos sigue disponible tal cual,
+en paralelo.
 
 ## Estado persistente
 
