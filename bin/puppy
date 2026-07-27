@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# puppy — entry point global de la herramienta, llamable desde cualquier repo.
+# Un "pup" es un worker: un agente Claude Code corriendo aislado en su propio
+# git worktree, lanzado y supervisado por el puppy principal (este agente).
+#
+# uso:
+#   puppy spawn <pup-id> <repo-path> <branch> <prompt...>
+#   puppy pr <pup-id> [-- <args extra de gh pr create>]
+#   puppy rm <pup-id> [--force]
+#   puppy supervise [pup-id ...]
+#   puppy ls
+#   puppy status <pup-id>
+
+puppy_dir="$HOME/puppy"
+bin="$puppy_dir/bin"
+
+cmd="${1:-}"
+[[ $# -gt 0 ]] && shift || true
+
+case "$cmd" in
+  spawn)
+    exec "$bin/spawn-pup.sh" "$@"
+    ;;
+  pr)
+    exec "$bin/open-pr.sh" "$@"
+    ;;
+  rm)
+    exec "$bin/remove-pup.sh" "$@"
+    ;;
+  supervise)
+    exec "$bin/supervise.sh" "$@"
+    ;;
+  ls)
+    tasks_dir="$puppy_dir/data/tasks"
+    if [[ ! -d "$tasks_dir" ]] || [[ -z "$(ls -A "$tasks_dir" 2>/dev/null)" ]]; then
+      echo "No hay pups registrados."
+      exit 0
+    fi
+    printf "%-20s %-10s %-30s %s\n" "PUP" "ESTADO" "REPO#BRANCH" "CREADO"
+    for f in "$tasks_dir"/*.json; do
+      jq -r '[.task_id, .status, (.repo | split("/") | last) + "#" + .branch, .created_at] | @tsv' "$f" \
+        | awk -F'\t' '{printf "%-20s %-10s %-30s %s\n", $1, $2, $3, $4}'
+    done
+    ;;
+  status)
+    if [[ $# -lt 1 ]]; then
+      echo "uso: puppy status <pup-id>" >&2
+      exit 1
+    fi
+    jq . "$puppy_dir/data/tasks/$1.json"
+    ;;
+  *)
+    cat >&2 <<'EOF'
+uso: puppy <comando> [args]
+
+comandos:
+  spawn <pup-id> <repo-path> <branch> <prompt...>   lanza un pup (worktree + worker)
+  pr <pup-id> [-- args de gh pr create]             pushea y abre PR
+  rm <pup-id> [--force]                             borra worktree + registro del pup
+  supervise [pup-id ...]                             espera (sondeo) a que resuelva algún pup
+  ls                                                  lista pups registrados y su estado
+  status <pup-id>                                     muestra la metadata completa de un pup
+EOF
+    exit 1
+    ;;
+esac

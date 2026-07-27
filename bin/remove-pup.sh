@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# remove-worktree.sh <task-id> [--force]
+# remove-pup.sh <pup-id> [--force]
 #
 # Ayuda (no bloquea de forma dura) a borrar el worktree de una tarea. Avisa
 # si hay cambios sin commitear o commits sin pushear; con --force borra
@@ -10,7 +10,7 @@ set -uo pipefail
 # comprobar" vive en AGENTS.md.
 
 if [[ $# -lt 1 ]]; then
-  echo "uso: remove-worktree.sh <task-id> [--force]" >&2
+  echo "uso: remove-pup.sh <pup-id> [--force]" >&2
   exit 1
 fi
 
@@ -19,8 +19,8 @@ force=0
 [[ "${2:-}" == "--force" ]] && force=1
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-lead_dir="$(dirname "$script_dir")"
-task_file="$lead_dir/data/tasks/$task_id.json"
+puppy_dir="$(dirname "$script_dir")"
+task_file="$puppy_dir/data/tasks/$task_id.json"
 
 if [[ ! -f "$task_file" ]]; then
   echo "error: no existe $task_file" >&2

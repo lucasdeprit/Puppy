@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# spawn-task.sh <task-id> <repo-path> <branch> <prompt...>
+# spawn-pup.sh <pup-id> <repo-path> <branch> <prompt...>
 #
 # Crea un worktree aislado para <repo-path>, arranca un worker Claude dentro,
-# le manda el prompt, y lanza watch-task.sh en background para avisar al
-# lead cuando termine. No bloquea.
+# le manda el prompt, y lanza watch-pup.sh en background para avisar al
+# puppy cuando termine. No bloquea.
 
 if [[ $# -lt 4 ]]; then
-  echo "uso: spawn-task.sh <task-id> <repo-path> <branch> <prompt...>" >&2
+  echo "uso: spawn-pup.sh <pup-id> <repo-path> <branch> <prompt...>" >&2
   exit 1
 fi
 
@@ -16,15 +16,15 @@ task_id=$1; repo=$2; branch=$3; shift 3
 prompt="$*"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-lead_dir="$(dirname "$script_dir")"
-tasks_dir="$lead_dir/data/tasks"
-events_log="$lead_dir/data/events.log"
+puppy_dir="$(dirname "$script_dir")"
+tasks_dir="$puppy_dir/data/tasks"
+events_log="$puppy_dir/data/events.log"
 task_file="$tasks_dir/$task_id.json"
 
 mkdir -p "$tasks_dir"
 
 if [[ -e "$task_file" ]]; then
-  echo "error: ya existe una tarea con id '$task_id' ($task_file)" >&2
+  echo "error: ya existe un pup con id '$task_id' ($task_file)" >&2
   exit 1
 fi
 
@@ -34,8 +34,8 @@ if ! git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
-lead_pane="${HERDR_PANE_ID:-}"
-if [[ -z "$lead_pane" ]]; then
+puppy_pane="${HERDR_PANE_ID:-}"
+if [[ -z "$puppy_pane" ]]; then
   echo "error: HERDR_PANE_ID no está definido; este script debe correr dentro de una sesión herdr" >&2
   exit 1
 fi
@@ -106,19 +106,19 @@ jq -n \
   --arg worktree_path "$worktree_path" \
   --arg workspace "$workspace" \
   --arg pane "$pane" \
-  --arg lead_pane "$lead_pane" \
+  --arg puppy_pane "$puppy_pane" \
   --arg created_at "$created_at" \
   --arg prompt "$prompt" \
   --arg context_preamble "$context_preamble" \
   '{task_id: $task_id, repo: $repo, branch: $branch, worktree_path: $worktree_path,
-    workspace_id: $workspace, pane_id: $pane, lead_pane_id: $lead_pane,
+    workspace_id: $workspace, pane_id: $pane, puppy_pane_id: $puppy_pane,
     status: "started", created_at: $created_at, prompt: $prompt,
     context_preamble: $context_preamble}' \
   > "$task_file"
 
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id started pane=$pane worktree=$worktree_path" >> "$events_log"
 
-nohup "$script_dir/watch-task.sh" "$task_id" >/dev/null 2>&1 &
+nohup "$script_dir/watch-pup.sh" "$task_id" >/dev/null 2>&1 &
 disown
 
-echo "Tarea '$task_id' lanzada. worktree=$worktree_path pane=$pane"
+echo "Pup '$task_id' lanzado. worktree=$worktree_path pane=$pane"

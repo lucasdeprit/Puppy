@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# open-pr.sh <task-id> [-- <extra gh pr create args>]
+# open-pr.sh <pup-id> [-- <extra gh pr create args>]
 #
 # Pushea la rama de la tarea y abre un PR con `gh pr create`. No fusiona
 # nada directamente: el flujo por defecto es PR, no merge directo. Guarda
-# la URL del PR en data/tasks/<task-id>.json.
+# la URL del PR en data/tasks/<pup-id>.json.
 
 if [[ $# -lt 1 ]]; then
-  echo "uso: open-pr.sh <task-id> [-- <extra gh pr create args>]" >&2
+  echo "uso: open-pr.sh <pup-id> [-- <extra gh pr create args>]" >&2
   exit 1
 fi
 
@@ -17,8 +17,8 @@ if [[ "${1:-}" == "--" ]]; then shift; fi
 extra_args=("$@")
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-lead_dir="$(dirname "$script_dir")"
-task_file="$lead_dir/data/tasks/$task_id.json"
+puppy_dir="$(dirname "$script_dir")"
+task_file="$puppy_dir/data/tasks/$task_id.json"
 
 if [[ ! -f "$task_file" ]]; then
   echo "error: no existe $task_file" >&2
