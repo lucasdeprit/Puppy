@@ -25,30 +25,38 @@ case "$cmd" in
     if [[ -n "$existing_ws" ]]; then
       herdr workspace focus "$existing_ws" >/dev/null
       echo "Puppy ya estaba abierto (workspace $existing_ws), lo he enfocado."
-      exit 0
-    fi
-
-    ws_json=$(herdr workspace create --cwd "$puppy_dir" --label puppy --focus)
-    if echo "$ws_json" | jq -e '.error' >/dev/null 2>&1; then
-      echo "error creando el workspace de Puppy: $(echo "$ws_json" | jq -r '.error.message')" >&2
-      exit 1
-    fi
-    ws_id=$(echo "$ws_json" | jq -r '.result.workspace.workspace_id // .result.workspace_id')
-    pane_id=$(echo "$ws_json" | jq -r '.result.pane.pane_id // .result.root_pane.pane_id')
-
-    started=0
-    for attempt in 1 2 3 4 5; do
-      if herdr agent start puppy --kind claude --pane "$pane_id" -- --continue >/dev/null 2>&1; then
-        started=1
-        break
+    else
+      ws_json=$(herdr workspace create --cwd "$puppy_dir" --label puppy --focus)
+      if echo "$ws_json" | jq -e '.error' >/dev/null 2>&1; then
+        echo "error creando el workspace de Puppy: $(echo "$ws_json" | jq -r '.error.message')" >&2
+        exit 1
       fi
-      sleep 1
-    done
-    if [[ "$started" -ne 1 ]]; then
-      echo "error: workspace creado (id $ws_id) pero no se pudo arrancar Claude Code en el pane $pane_id" >&2
-      exit 1
+      ws_id=$(echo "$ws_json" | jq -r '.result.workspace.workspace_id // .result.workspace_id')
+      pane_id=$(echo "$ws_json" | jq -r '.result.pane.pane_id // .result.root_pane.pane_id')
+
+      started=0
+      for attempt in 1 2 3 4 5; do
+        if herdr agent start puppy --kind claude --pane "$pane_id" -- --continue >/dev/null 2>&1; then
+          started=1
+          break
+        fi
+        sleep 1
+      done
+      if [[ "$started" -ne 1 ]]; then
+        echo "error: workspace creado (id $ws_id) pero no se pudo arrancar Claude Code en el pane $pane_id" >&2
+        exit 1
+      fi
+      echo "Puppy arrancado en workspace $ws_id (pane $pane_id), cwd=$puppy_dir"
     fi
-    echo "Puppy arrancado en workspace $ws_id (pane $pane_id), cwd=$puppy_dir"
+
+    # Si esta terminal no está ya adjunta a herdr (p. ej. se llamó desde un
+    # Terminal.app normal), adjúntala ahora: así el usuario ve la ventana de
+    # herdr con el workspace de puppy ya enfocado, en vez de tener que ir a
+    # buscarla a mano. Si ya estamos dentro de un pane de herdr (HERDR_ENV=1,
+    # p. ej. llamando `puppy start` desde otro pup), no hace falta.
+    if [[ -z "${HERDR_ENV:-}" ]]; then
+      exec herdr
+    fi
     ;;
   spawn)
     exec "$bin/spawn-pup.sh" "$@"
