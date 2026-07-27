@@ -38,7 +38,7 @@ case "$cmd" in
 
     started=0
     for attempt in 1 2 3 4 5; do
-      if herdr agent start puppy --kind claude --pane "$pane_id" >/dev/null 2>&1; then
+      if herdr agent start puppy --kind claude --pane "$pane_id" -- --continue >/dev/null 2>&1; then
         started=1
         break
       fi
