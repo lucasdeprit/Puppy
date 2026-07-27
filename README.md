@@ -48,9 +48,26 @@ while you keep talking to the main Puppy without waiting around.
 `~/.local/bin` is on your `PATH`, `puppy` is callable from anywhere — no
 `cd` required.
 
+## Starting a session
+
+Open a terminal, start/attach herdr (`herdr`), then run:
+
+```
+puppy start
+```
+
+This opens (or, if already open, focuses) a herdr workspace with `cwd`
+set to `~/puppy` and a Claude Code session running in it. That session
+auto-loads `CLAUDE.md` → `AGENTS.md` and becomes **Puppy** — the agent you
+talk to, that spawns and manages pups. Running `puppy spawn`/`pr`/`rm`/...
+from any other shell works too (state lives in `~/puppy/data`, not tied to
+cwd), but talking to the actual Puppy agent is what gets you the
+automatic "pup finished" notifications injected into your conversation.
+
 ## Commands
 
 ```
+puppy start                                               open/focus the main Puppy session
 puppy spawn <pup-id> <repo-path> <branch> <prompt...>   launch a pup (worktree + worker)
 puppy pr <pup-id> [-- args for gh pr create]             push + open a PR
 puppy rm <pup-id> [--force]                               remove a pup's worktree + record
