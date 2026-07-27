@@ -6,6 +6,7 @@ set -euo pipefail
 # git worktree, lanzado y supervisado por el puppy principal (este agente).
 #
 # uso:
+#   puppy start [--resume|--fresh]
 #   puppy spawn <pup-id> <repo-path> <branch> <prompt...>
 #   puppy pr <pup-id> [-- <args extra de gh pr create>]
 #   puppy rm <pup-id> [--force]
@@ -21,8 +22,42 @@ cmd="${1:-}"
 
 case "$cmd" in
   start)
+    mode=""
+    for arg in "$@"; do
+      case "$arg" in
+        --fresh) mode="fresh" ;;
+        --resume) mode="resume" ;;
+      esac
+    done
+
     existing_ws=$(herdr workspace list | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
-    if [[ -n "$existing_ws" ]]; then
+
+    # Si el modo no vino forzado por flag, pregunta (solo si hay a quién
+    # preguntarle: una terminal interactiva). En modo no interactivo,
+    # por defecto se reanuda para no romper automatizaciones.
+    if [[ -z "$mode" ]]; then
+      if [[ -t 0 && -t 1 ]]; then
+        if [[ -n "$existing_ws" ]]; then
+          read -r -p "Puppy ya está abierto (workspace $existing_ws). ¿Reanudar [r] o cerrarlo y empezar de cero [c]? [r]: " answer
+        else
+          read -r -p "No hay workspace abierto, pero sí historial en disco. ¿Reanudar esa conversación [r] o empezar de cero [c]? [r]: " answer
+        fi
+        case "$answer" in
+          c|C|cerrar|close|fresh) mode="fresh" ;;
+          *) mode="resume" ;;
+        esac
+      else
+        mode="resume"
+      fi
+    fi
+
+    if [[ "$mode" == "fresh" && -n "$existing_ws" ]]; then
+      echo "Cerrando workspace previo de Puppy ($existing_ws)..."
+      herdr workspace close "$existing_ws" >/dev/null 2>&1 || true
+      existing_ws=""
+    fi
+
+    if [[ "$mode" == "resume" && -n "$existing_ws" ]]; then
       herdr workspace focus "$existing_ws" >/dev/null
       echo "Puppy ya estaba abierto (workspace $existing_ws), lo he enfocado."
     else
@@ -36,7 +71,12 @@ case "$cmd" in
 
       started=0
       for attempt in 1 2 3 4 5; do
-        if herdr agent start puppy --kind claude --pane "$pane_id" -- --continue >/dev/null 2>&1; then
+        if [[ "$mode" == "fresh" ]]; then
+          agent_ok=$(herdr agent start puppy --kind claude --pane "$pane_id" >/dev/null 2>&1 && echo 1 || echo 0)
+        else
+          agent_ok=$(herdr agent start puppy --kind claude --pane "$pane_id" -- --continue >/dev/null 2>&1 && echo 1 || echo 0)
+        fi
+        if [[ "$agent_ok" == "1" ]]; then
           started=1
           break
         fi
@@ -94,7 +134,8 @@ case "$cmd" in
 uso: puppy <comando> [args]
 
 comandos:
-  start                                               abre (o enfoca) la sesión del puppy principal
+  start [--resume|--fresh]                            abre (o enfoca) la sesión del puppy principal;
+                                                       sin flag pregunta si hay sesión previa que reanudar
   spawn <pup-id> <repo-path> <branch> <prompt...>   lanza un pup (worktree + worker)
   pr <pup-id> [-- args de gh pr create]             pushea y abre PR
   rm <pup-id> [--force]                             borra worktree + registro del pup
