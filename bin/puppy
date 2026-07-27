@@ -7,6 +7,7 @@ set -euo pipefail
 #
 # uso:
 #   puppy start [--resume|--fresh]
+#   puppy stop
 #   puppy spawn <pup-id> <repo-path> <branch> <prompt...>
 #   puppy pr <pup-id> [-- <args extra de gh pr create>]
 #   puppy rm <pup-id> [--force]
@@ -98,6 +99,25 @@ case "$cmd" in
       exec herdr
     fi
     ;;
+  stop)
+    existing_ws=$(herdr workspace list | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
+    if [[ -z "$existing_ws" ]]; then
+      echo "No hay sesión de Puppy abierta."
+      exit 0
+    fi
+
+    pane_id=$(herdr pane list --workspace "$existing_ws" 2>/dev/null | jq -r '.result.panes[0].pane_id // empty')
+    if [[ -n "$pane_id" ]]; then
+      pid=$(herdr pane process-info --pane "$pane_id" 2>/dev/null \
+        | jq -r '.result.process_info.foreground_processes[]? | select(.name=="claude") | .pid' | head -1)
+      if [[ -n "$pid" ]]; then
+        kill "$pid" 2>/dev/null || true
+      fi
+    fi
+
+    herdr workspace close "$existing_ws" >/dev/null 2>&1 || true
+    echo "Puppy detenido (workspace $existing_ws cerrado)."
+    ;;
   spawn)
     exec "$bin/spawn-pup.sh" "$@"
     ;;
@@ -111,15 +131,41 @@ case "$cmd" in
     exec "$bin/supervise.sh" "$@"
     ;;
   ls)
+    all_panes=$(herdr pane list 2>/dev/null || echo '{}')
+
+    ws_id=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
+    if [[ -n "$ws_id" ]]; then
+      pane_info=$(echo "$all_panes" | jq -c --arg w "$ws_id" '.result.panes[]? | select(.workspace_id==$w)' | head -1)
+      live=$(echo "$pane_info" | jq -r '.agent_status // "unknown"' 2>/dev/null)
+      preview=$(echo "$pane_info" | jq -r '.terminal_title_stripped // empty' 2>/dev/null)
+      echo "Puppy: ${live:-unknown} (workspace $ws_id)${preview:+ — \"$preview\"}"
+    else
+      echo "Puppy: cerrado (sin workspace abierto)"
+    fi
+    echo
+
     tasks_dir="$puppy_dir/data/tasks"
     if [[ ! -d "$tasks_dir" ]] || [[ -z "$(ls -A "$tasks_dir" 2>/dev/null)" ]]; then
       echo "No hay pups registrados."
       exit 0
     fi
-    printf "%-20s %-10s %-30s %s\n" "PUP" "ESTADO" "REPO#BRANCH" "CREADO"
+    printf "%-20s %-10s %-10s %-30s %s\n" "PUP" "ESTADO" "LIVE" "REPO#BRANCH" "PREVIEW"
     for f in "$tasks_dir"/*.json; do
-      jq -r '[.task_id, .status, (.repo | split("/") | last) + "#" + .branch, .created_at] | @tsv' "$f" \
-        | awk -F'\t' '{printf "%-20s %-10s %-30s %s\n", $1, $2, $3, $4}'
+      task_id=$(jq -r '.task_id' "$f")
+      status=$(jq -r '.status' "$f")
+      repo_branch=$(jq -r '(.repo | split("/") | last) + "#" + .branch' "$f")
+      pane_id=$(jq -r '.pane_id // empty' "$f")
+
+      live="-"
+      preview="-"
+      if [[ -n "$pane_id" ]]; then
+        pup_pane=$(echo "$all_panes" | jq -r --arg p "$pane_id" '.result.panes[]? | select(.pane_id==$p)')
+        if [[ -n "$pup_pane" ]]; then
+          live=$(echo "$pup_pane" | jq -r '.agent_status // "unknown"')
+          preview=$(echo "$pup_pane" | jq -r '.terminal_title_stripped // "-"')
+        fi
+      fi
+      printf "%-20s %-10s %-10s %-30s %s\n" "$task_id" "$status" "$live" "$repo_branch" "$preview"
     done
     ;;
   status)
@@ -136,11 +182,12 @@ uso: puppy <comando> [args]
 comandos:
   start [--resume|--fresh]                            abre (o enfoca) la sesión del puppy principal;
                                                        sin flag pregunta si hay sesión previa que reanudar
+  stop                                                 termina el proceso de puppy y cierra su workspace
   spawn <pup-id> <repo-path> <branch> <prompt...>   lanza un pup (worktree + worker)
   pr <pup-id> [-- args de gh pr create]             pushea y abre PR
   rm <pup-id> [--force]                             borra worktree + registro del pup
   supervise [pup-id ...]                             espera (sondeo) a que resuelva algún pup
-  ls                                                  lista pups registrados y su estado
+  ls                                                  lista pups registrados + estado de la sesión de puppy
   status <pup-id>                                     muestra la metadata completa de un pup
 EOF
     exit 1
