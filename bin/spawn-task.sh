@@ -40,7 +40,7 @@ if [[ -z "$lead_pane" ]]; then
   exit 1
 fi
 
-create_json=$(herdr worktree create --cwd "$repo" --branch "$branch" --json)
+create_json=$(herdr worktree create --cwd "$repo" --branch "$branch" --no-focus --json)
 if echo "$create_json" | jq -e '.error' >/dev/null 2>&1; then
   echo "error creando worktree: $(echo "$create_json" | jq -r '.error.message')" >&2
   exit 1
