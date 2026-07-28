@@ -40,6 +40,28 @@ if [[ -z "$puppy_pane" ]]; then
   exit 1
 fi
 
+# Antes de crear el worktree, comprobamos si la rama destino ya está en uso.
+# Si ya hay un worktree con esa rama checked out, abortamos con un mensaje
+# claro en vez de dejar que 'herdr worktree create' (o el git subyacente)
+# falle con un error crudo.
+existing_wt_path=$(git -C "$repo" worktree list --porcelain | awk -v b="refs/heads/$branch" '
+  /^worktree / { path=$2 }
+  /^branch / { if ($2 == b) print path }
+')
+if [[ -n "$existing_wt_path" ]]; then
+  echo "error: la rama '$branch' ya está checked out en $existing_wt_path" >&2
+  exit 1
+fi
+
+# Si la rama existe pero no está en ningún worktree (p. ej. quedó de un
+# intento anterior cuyo worktree ya se borró), la dejamos pasar en vez de
+# abortar: es un caso legítimo y 'herdr worktree create' la reutilizará como
+# base en vez de crear una rama nueva. Solo avisamos para que quede
+# constancia en el log del pup de que no se parte de una rama nueva.
+if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
+  echo "aviso: la rama '$branch' ya existe (sin worktree activo); se reutilizará" >&2
+fi
+
 create_json=$(herdr worktree create --cwd "$repo" --branch "$branch" --no-focus --json)
 if echo "$create_json" | jq -e '.error' >/dev/null 2>&1; then
   echo "error creando worktree: $(echo "$create_json" | jq -r '.error.message')" >&2
