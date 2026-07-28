@@ -217,7 +217,39 @@ case "$cmd" in
       echo "error: no hay pane_id registrado para '$pup_id'" >&2
       exit 1
     fi
-    herdr agent prompt "$pane_id" "$*"
+
+    # Same pattern as spawn-pup.sh: confirm the pup actually picked up the
+    # message (--wait --until working) before assuming it's off working on
+    # it, retrying in case the prompt got lost.
+    prompted=0
+    for attempt in 1 2 3 4 5; do
+      if herdr agent prompt "$pane_id" "$*" --wait --until working --timeout 5000 >/dev/null 2>&1; then
+        prompted=1
+        break
+      fi
+      sleep 1
+    done
+    if [[ "$prompted" -ne 1 ]]; then
+      echo "error: el mensaje no llegó a arrancar al pup '$pup_id' en el pane $pane_id tras varios intentos" >&2
+      exit 1
+    fi
+
+    # The pup's original watcher is single-use and already fired when the
+    # pup finished its initial task, so nobody will notice when it's done
+    # with this follow-up unless we relaunch one.
+    watcher_pid=$(jq -r '.watcher_pid // empty' "$task_file")
+    if [[ -n "$watcher_pid" ]] && kill -0 "$watcher_pid" 2>/dev/null; then
+      echo "Mensaje enviado a '$pup_id'; ya hay un watcher vivo (pid=$watcher_pid)."
+    else
+      nohup "$bin/watch-pup.sh" "$pup_id" >/dev/null 2>&1 &
+      new_watcher_pid=$!
+      disown
+
+      tmp_file=$(mktemp)
+      jq --arg watcher_pid "$new_watcher_pid" '.watcher_pid = ($watcher_pid | tonumber)' "$task_file" > "$tmp_file" && mv "$tmp_file" "$task_file"
+
+      echo "Mensaje enviado a '$pup_id'; watcher relanzado (pid=$new_watcher_pid)."
+    fi
     ;;
   usage)
     exec "$bin/usage.sh" "$@"
