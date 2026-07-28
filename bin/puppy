@@ -15,6 +15,7 @@ set -euo pipefail
 #   puppy ls
 #   puppy status <pup-id>
 #   puppy watchers
+#   puppy tell <pup-id> <text>
 
 puppy_dir="$HOME/puppy"
 bin="$puppy_dir/bin"
@@ -181,6 +182,24 @@ case "$cmd" in
   watchers)
     exec "$bin/watchers.sh" "$@"
     ;;
+  tell)
+    if [[ $# -lt 2 ]]; then
+      echo "uso: puppy tell <pup-id> <text>" >&2
+      exit 1
+    fi
+    pup_id=$1; shift
+    task_file="$puppy_dir/data/tasks/$pup_id.json"
+    if [[ ! -f "$task_file" ]]; then
+      echo "error: no existe $task_file" >&2
+      exit 1
+    fi
+    pane_id=$(jq -r '.pane_id // empty' "$task_file")
+    if [[ -z "$pane_id" ]]; then
+      echo "error: no hay pane_id registrado para '$pup_id'" >&2
+      exit 1
+    fi
+    herdr agent prompt "$pane_id" "$*"
+    ;;
   *)
     cat >&2 <<'EOF'
 uso: puppy <comando> [args]
@@ -196,6 +215,7 @@ comandos:
   ls                                                  lista pups registrados + estado de la sesión de puppy
   status <pup-id>                                     muestra la metadata completa de un pup
   watchers                                            lista watch-pup.sh vivos y detecta huérfanos
+  tell <pup-id> <text>                                envía una instrucción de seguimiento a un pup en marcha
 EOF
     exit 1
     ;;
