@@ -25,8 +25,34 @@ pane=$(jq -r '.pane_id' "$task_file")
 puppy_pane=$(jq -r '.puppy_pane_id' "$task_file")
 repo=$(jq -r '.repo' "$task_file")
 branch=$(jq -r '.branch' "$task_file")
+repo_name=$(basename "$repo")
 
-result=$(herdr agent wait "$pane" --until done --until blocked --until unknown --until idle)
+# 'herdr agent wait' can fail on a transient hiccup (network, herdr itself)
+# instead of ever resolving to one of the --until statuses. Retry a few
+# times with a short backoff before giving up, same pattern as the
+# start/prompt retries in spawn-pup.sh and bin/puppy.
+result=""
+wait_ok=0
+for attempt in 1 2 3 4 5; do
+  if result=$(herdr agent wait "$pane" --until done --until blocked --until unknown --until idle); then
+    wait_ok=1
+    break
+  fi
+  echo "aviso: 'herdr agent wait' falló para $task_id (intento $attempt/5)" >&2
+  sleep "$attempt"
+done
+
+if [[ "$wait_ok" -ne 1 ]]; then
+  # Don't touch task_file's status here: the pup itself may still be
+  # running fine, it's the watcher that gave up. Overwriting status would
+  # misrepresent the pup as done/blocked/etc. when we simply don't know.
+  echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id status=started watcher_error=wait_failed pane=$pane" >> "$events_log"
+  herdr agent prompt "$puppy_pane" \
+    "⚠️ El watcher del pup '$task_id' ($repo_name#$branch) falló tras varios intentos de 'herdr agent wait' y dejó de monitorearlo — el pup puede seguir corriendo, pero no hay forma automática de saber en qué estado quedó. Requiere revisión manual: revisá el pane $pane con 'puppy status $task_id' y considerá relanzar el watcher." \
+    >/dev/null 2>&1 || true
+  exit 1
+fi
+
 status=$(echo "$result" | jq -r '.result.agent.agent_status // "error"')
 
 tmp_file=$(mktemp)
@@ -34,7 +60,6 @@ jq --arg status "$status" '.status = $status' "$task_file" > "$tmp_file" && mv "
 
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id status=$status pane=$pane" >> "$events_log"
 
-repo_name=$(basename "$repo")
 herdr agent prompt "$puppy_pane" \
   "🐶 El pup '$task_id' ($repo_name#$branch) ha terminado con estado: $status. Revisa 'puppy status $task_id' y su events.log para más detalle." \
   >/dev/null 2>&1 || true
