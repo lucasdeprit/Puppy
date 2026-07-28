@@ -3,9 +3,10 @@ set -euo pipefail
 
 # watch-pup.sh <pup-id>
 #
-# Meant to run in the background (spawn-pup.sh launches it). Blocks,
-# waiting for pup <pup-id> to reach done/blocked/unknown, logs the event,
-# and notifies the main puppy by injecting a message into its own pane.
+# Meant to run in the background (spawn-pup.sh launches it, and 'puppy
+# tell' relaunches it after a follow-up). Blocks, waiting for pup <pup-id>
+# to reach done/blocked/unknown/idle, logs the event, and notifies the
+# main puppy by injecting a message into its own pane.
 
 if [[ $# -lt 1 ]]; then
   echo "uso: watch-pup.sh <pup-id>" >&2
@@ -25,7 +26,7 @@ puppy_pane=$(jq -r '.puppy_pane_id' "$task_file")
 repo=$(jq -r '.repo' "$task_file")
 branch=$(jq -r '.branch' "$task_file")
 
-result=$(herdr agent wait "$pane" --until done --until blocked --until unknown)
+result=$(herdr agent wait "$pane" --until done --until blocked --until unknown --until idle)
 status=$(echo "$result" | jq -r '.result.agent.agent_status // "error"')
 
 tmp_file=$(mktemp)
