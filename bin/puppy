@@ -24,7 +24,7 @@ set -euo pipefail
 #   puppy tell <pup-id> <text>
 #   puppy usage
 
-puppy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+puppy_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 bin="$puppy_dir/bin"
 source "$bin/lib/project.sh"
 
