@@ -14,6 +14,7 @@ set -euo pipefail
 #   puppy supervise [pup-id ...]
 #   puppy ls
 #   puppy status <pup-id>
+#   puppy watchers
 
 puppy_dir="$HOME/puppy"
 bin="$puppy_dir/bin"
@@ -176,6 +177,9 @@ case "$cmd" in
     fi
     jq . "$puppy_dir/data/tasks/$1.json"
     ;;
+  watchers)
+    exec "$bin/watchers.sh" "$@"
+    ;;
   *)
     cat >&2 <<'EOF'
 uso: puppy <comando> [args]
@@ -190,6 +194,7 @@ comandos:
   supervise [pup-id ...]                             espera (sondeo) a que resuelva algún pup
   ls                                                  lista pups registrados + estado de la sesión de puppy
   status <pup-id>                                     muestra la metadata completa de un pup
+  watchers                                            lista watch-pup.sh vivos y detecta huérfanos
 EOF
     exit 1
     ;;
