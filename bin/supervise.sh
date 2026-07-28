@@ -3,15 +3,15 @@ set -uo pipefail
 
 # supervise.sh [pup-id ...]
 #
-# Bloquea hasta que alguna de las tareas indicadas (o todas las que sigan
-# en estado "started" si no se pasan argumentos) cambie de estado.
+# Blocks until one of the given tasks (or all tasks still in "started"
+# state, if no arguments are passed) changes state.
 #
-# NOTA: no usa `wait -n` de bash sobre jobs en background porque el Bash
-# tool de Claude Code no persiste el estado de shell (ni la tabla de jobs)
-# entre llamadas — cada invocación puede correr en un proceso de shell
-# distinto. watch-pup.sh ya avisa de forma proactiva vía `herdr agent
-# prompt` en cuanto una tarea resuelve; este script es solo para el caso
-# en que el usuario pida esperar de forma síncrona, y lo hace sondeando
+# NOTE: doesn't use bash's `wait -n` on background jobs because Claude
+# Code's Bash tool doesn't persist shell state (nor the job table) between
+# calls — each invocation can run in a different shell process.
+# watch-pup.sh already proactively notifies via `herdr agent prompt` as
+# soon as a task resolves; this script is only for the case where the
+# user asks to wait synchronously, and it does so by polling
 # data/tasks/*.json.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

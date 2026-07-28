@@ -3,9 +3,9 @@ set -euo pipefail
 
 # watch-pup.sh <pup-id>
 #
-# Pensado para correr en background (lo lanza spawn-pup.sh). Espera,
-# bloqueante, a que el pup <pup-id> llegue a done/blocked/unknown,
-# registra el evento y avisa al puppy principal inyectando un mensaje en su propio pane.
+# Meant to run in the background (spawn-pup.sh launches it). Blocks,
+# waiting for pup <pup-id> to reach done/blocked/unknown, logs the event,
+# and notifies the main puppy by injecting a message into its own pane.
 
 if [[ $# -lt 1 ]]; then
   echo "uso: watch-pup.sh <pup-id>" >&2

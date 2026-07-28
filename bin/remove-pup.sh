@@ -3,11 +3,11 @@ set -uo pipefail
 
 # remove-pup.sh <pup-id> [--force]
 #
-# Ayuda (no bloquea de forma dura) a borrar el worktree de una tarea. Avisa
-# si hay cambios sin commitear o commits sin pushear; con --force borra
-# igualmente. Esto es un helper, no un candado técnico: nada impide llamar
-# a `herdr worktree remove` directamente, la norma de "no borrar sin
-# comprobar" vive en AGENTS.md.
+# Helps (doesn't hard-block) delete a task's worktree. Warns if there are
+# uncommitted changes or unpushed commits; with --force deletes anyway.
+# This is a helper, not a technical lock: nothing stops calling
+# `herdr worktree remove` directly, the "don't delete without checking"
+# rule lives in AGENTS.md.
 
 if [[ $# -lt 1 ]]; then
   echo "uso: remove-pup.sh <pup-id> [--force]" >&2
