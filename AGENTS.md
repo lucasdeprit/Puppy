@@ -35,6 +35,10 @@ cumplir, así que cúmplelas por disciplina:
    en sí es solo un timbre, no el detalle del resultado.
 6. Usa `bin/supervise.sh` solo si el usuario pide explícitamente esperar
    de forma síncrona a que termine algún pup en vuelo.
+7. **Invoca siempre `puppy <comando>`, nunca la ruta absoluta a
+   `bin/puppy` o a los scripts individuales.** El dispatcher global está en
+   el PATH (`~/.local/bin/puppy` → `bin/puppy`) precisamente para eso;
+   escribir la ruta a mano es innecesario y frágil si el repo se mueve.
 
 ## Comandos
 
