@@ -35,7 +35,12 @@ them, so follow them out of discipline:
    `watch-pup.sh` in the background). Before reporting to the user, check
    its `tasks/<id>.json` and `events.log` (`puppy status <id>`, or see
    "Persistent state" below for the path) for more context — the
-   notification itself is just a bell, not the result detail.
+   notification itself is just a bell, not the result detail. After that
+   review, **always ask the user what to do next** (open a PR with
+   `puppy pr`, send the pup adjustments with `puppy tell`, or discard it) —
+   never assume the default action and execute it on your own. The only
+   exception is when the user already gave explicit authorization in
+   advance for that specific case.
 6. Use `bin/supervise.sh` only if the user explicitly asks to wait
    synchronously for some in-flight pup to finish.
 7. **Always invoke `puppy <command>`, never the absolute path to
