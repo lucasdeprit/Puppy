@@ -42,7 +42,7 @@ fi
 
 git -C "$worktree_path" push -u origin "$branch"
 
-pr_url=$(cd "$worktree_path" && gh pr create --fill "${extra_args[@]}" 2>&1 | tail -1)
+pr_url=$(cd "$worktree_path" && gh pr create --fill "${extra_args[@]+"${extra_args[@]}"}" 2>&1 | tail -1)
 
 pr_json=$(cd "$worktree_path" && gh pr view "$branch" --json url,number,state 2>/dev/null || echo '{}')
 pr_number=$(echo "$pr_json" | jq -r '.number // empty')
