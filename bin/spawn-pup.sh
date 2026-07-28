@@ -16,9 +16,12 @@ task_id=$1; repo=$2; branch=$3; shift 3
 prompt="$*"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-puppy_dir="$(dirname "$script_dir")"
-tasks_dir="$puppy_dir/data/tasks"
-events_log="$puppy_dir/data/events.log"
+source "$script_dir/lib/project.sh"
+
+project_dir="$(puppy_project_dir)"
+data_dir="$(puppy_data_dir "$project_dir")"
+tasks_dir="$data_dir/tasks"
+events_log="$data_dir/events.log"
 task_file="$tasks_dir/$task_id.json"
 
 mkdir -p "$tasks_dir"
@@ -147,10 +150,11 @@ jq -n \
   --arg created_at "$created_at" \
   --arg prompt "$prompt" \
   --arg context_preamble "$context_preamble" \
+  --arg project_dir "$project_dir" \
   '{task_id: $task_id, repo: $repo, branch: $branch, worktree_path: $worktree_path,
     workspace_id: $workspace, pane_id: $pane, puppy_pane_id: $puppy_pane,
     status: "started", created_at: $created_at, prompt: $prompt,
-    context_preamble: $context_preamble}' \
+    context_preamble: $context_preamble, project_dir: $project_dir}' \
   > "$task_file"
 
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id started pane=$pane worktree=$worktree_path" >> "$events_log"

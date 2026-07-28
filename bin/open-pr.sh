@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Pushes the task's branch and opens a PR with `gh pr create`. Doesn't merge
 # anything directly: the default flow is PR, not direct merge. Saves the
-# PR URL in data/tasks/<pup-id>.json.
+# PR URL in the pup's tasks/<pup-id>.json (see lib/project.sh).
 
 if [[ $# -lt 1 ]]; then
   echo "uso: open-pr.sh <pup-id> [-- <extra gh pr create args>]" >&2
@@ -17,13 +17,9 @@ if [[ "${1:-}" == "--" ]]; then shift; fi
 extra_args=("$@")
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-puppy_dir="$(dirname "$script_dir")"
-task_file="$puppy_dir/data/tasks/$task_id.json"
+source "$script_dir/lib/project.sh"
 
-if [[ ! -f "$task_file" ]]; then
-  echo "error: no existe $task_file" >&2
-  exit 1
-fi
+task_file=$(puppy_find_task "$task_id") || exit 1
 
 worktree_path=$(jq -r '.worktree_path' "$task_file")
 branch=$(jq -r '.branch' "$task_file")

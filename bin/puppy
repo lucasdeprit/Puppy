@@ -5,9 +5,15 @@ set -euo pipefail
 # A "pup" is a worker: a Claude Code agent running isolated in its own
 # git worktree, launched and supervised by the main puppy (this agent).
 #
+# puppy's own installation (this file, bin/, AGENTS.md) is fixed at a
+# single location, self-located below. The *project* it orchestrates over
+# is per-session (see bin/lib/project.sh) — by default the cwd `puppy
+# start` was run from — so multiple projects can each have their own
+# concurrent puppy session and their own pup state.
+#
 # usage:
-#   puppy start [--resume|--fresh]
-#   puppy stop
+#   puppy start [project-dir] [--resume|--fresh]
+#   puppy stop [project-dir]
 #   puppy spawn <pup-id> <repo-path> <branch> <prompt...>
 #   puppy pr <pup-id> [-- <extra gh pr create args>]
 #   puppy rm <pup-id> [--force]
@@ -18,8 +24,9 @@ set -euo pipefail
 #   puppy tell <pup-id> <text>
 #   puppy usage
 
-puppy_dir="$HOME/puppy"
+puppy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bin="$puppy_dir/bin"
+source "$bin/lib/project.sh"
 
 cmd="${1:-}"
 [[ $# -gt 0 ]] && shift || true
@@ -27,14 +34,24 @@ cmd="${1:-}"
 case "$cmd" in
   start)
     mode=""
+    project_arg=""
     for arg in "$@"; do
       case "$arg" in
         --fresh) mode="fresh" ;;
         --resume) mode="resume" ;;
+        *) project_arg="$arg" ;;
       esac
     done
 
-    existing_ws=$(herdr workspace list | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
+    project_dir="$(cd "${project_arg:-$PWD}" && pwd -P)"
+    slug=$(puppy_project_slug "$project_dir")
+    label="puppy-$slug"
+
+    if [[ ! -d "$project_dir/.claude" ]]; then
+      echo "aviso: $project_dir no tiene carpeta .claude" >&2
+    fi
+
+    existing_ws=$(herdr workspace list | jq -r --arg label "$label" '.result.workspaces[] | select(.label==$label) | .workspace_id' | head -1)
 
     # If the mode wasn't forced by a flag, ask (only if there's someone
     # to ask: an interactive terminal). In non-interactive mode, default
@@ -42,9 +59,9 @@ case "$cmd" in
     if [[ -z "$mode" ]]; then
       if [[ -t 0 && -t 1 ]]; then
         if [[ -n "$existing_ws" ]]; then
-          read -r -p "Puppy ya está abierto (workspace $existing_ws). ¿Reanudar [r] o cerrarlo y empezar de cero [c]? [r]: " answer
+          read -r -p "Puppy ya está abierto para $project_dir (workspace $existing_ws). ¿Reanudar [r] o cerrarlo y empezar de cero [c]? [r]: " answer
         else
-          read -r -p "No hay workspace abierto, pero sí historial en disco. ¿Reanudar esa conversación [r] o empezar de cero [c]? [r]: " answer
+          read -r -p "No hay workspace abierto para $project_dir, pero sí historial en disco. ¿Reanudar esa conversación [r] o empezar de cero [c]? [r]: " answer
         fi
         case "$answer" in
           c|C|cerrar|close|fresh) mode="fresh" ;;
@@ -63,9 +80,9 @@ case "$cmd" in
 
     if [[ "$mode" == "resume" && -n "$existing_ws" ]]; then
       herdr workspace focus "$existing_ws" >/dev/null
-      echo "Puppy ya estaba abierto (workspace $existing_ws), lo he enfocado."
+      echo "Puppy ya estaba abierto (workspace $existing_ws) para $project_dir, lo he enfocado."
     else
-      ws_json=$(herdr workspace create --cwd "$puppy_dir" --label puppy --focus)
+      ws_json=$(herdr workspace create --cwd "$project_dir" --env "PUPPY_PROJECT_DIR=$project_dir" --label "$label" --focus)
       if echo "$ws_json" | jq -e '.error' >/dev/null 2>&1; then
         echo "error creando el workspace de Puppy: $(echo "$ws_json" | jq -r '.error.message')" >&2
         exit 1
@@ -90,7 +107,25 @@ case "$cmd" in
         echo "error: workspace creado (id $ws_id) pero no se pudo arrancar Claude Code en el pane $pane_id" >&2
         exit 1
       fi
-      echo "Puppy arrancado en workspace $ws_id (pane $pane_id), cwd=$puppy_dir"
+      echo "Puppy arrancado en workspace $ws_id (pane $pane_id), cwd=$project_dir"
+
+      # Only a truly new conversation needs the identity/rules message sent
+      # explicitly: on --continue (resume) it's already in the history
+      # being resumed.
+      if [[ "$mode" == "fresh" ]]; then
+        init_prompt="Leé $puppy_dir/AGENTS.md y seguilo — tiene tu rol, tus reglas y tus comandos. Tu proyecto activo en esta sesión es $project_dir."
+        prompted=0
+        for attempt in 1 2 3 4 5; do
+          if herdr agent prompt "$pane_id" "$init_prompt" --wait --until working --timeout 5000 >/dev/null 2>&1; then
+            prompted=1
+            break
+          fi
+          sleep 1
+        done
+        if [[ "$prompted" -ne 1 ]]; then
+          echo "aviso: no se pudo enviar el mensaje inicial de rol al pane $pane_id tras varios intentos" >&2
+        fi
+      fi
     fi
 
     # If this terminal isn't already attached to herdr (e.g. it was called
@@ -104,9 +139,13 @@ case "$cmd" in
     fi
     ;;
   stop)
-    existing_ws=$(herdr workspace list | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
+    project_dir="$(cd "${1:-$PWD}" && pwd -P)"
+    slug=$(puppy_project_slug "$project_dir")
+    label="puppy-$slug"
+
+    existing_ws=$(herdr workspace list | jq -r --arg label "$label" '.result.workspaces[] | select(.label==$label) | .workspace_id' | head -1)
     if [[ -z "$existing_ws" ]]; then
-      echo "No hay sesión de Puppy abierta."
+      echo "No hay sesión de Puppy abierta para $project_dir."
       exit 0
     fi
 
@@ -137,14 +176,20 @@ case "$cmd" in
   ls)
     all_panes=$(herdr pane list 2>/dev/null || echo '{}')
 
-    ws_id=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
-    if [[ -n "$ws_id" ]]; then
-      pane_info=$(echo "$all_panes" | jq -c --arg w "$ws_id" '.result.panes[]? | select(.workspace_id==$w)' | head -1)
-      live=$(echo "$pane_info" | jq -r '.agent_status // "unknown"' 2>/dev/null)
-      preview=$(echo "$pane_info" | jq -r '.terminal_title_stripped // empty' 2>/dev/null)
-      echo "Puppy: ${live:-unknown} (workspace $ws_id)${preview:+ — \"$preview\"}"
-    else
+    ws_lines=$(herdr workspace list 2>/dev/null | jq -c '.result.workspaces[]? | select(.label | test("^puppy-"))')
+    if [[ -z "$ws_lines" ]]; then
       echo "Puppy: cerrado (sin workspace abierto)"
+    else
+      while IFS= read -r ws; do
+        [[ -z "$ws" ]] && continue
+        ws_id=$(echo "$ws" | jq -r '.workspace_id')
+        label=$(echo "$ws" | jq -r '.label')
+        cwd=$(echo "$ws" | jq -r '.worktree.checkout_path // empty')
+        pane_info=$(echo "$all_panes" | jq -c --arg w "$ws_id" '.result.panes[]? | select(.workspace_id==$w)' | head -1)
+        live=$(echo "$pane_info" | jq -r '.agent_status // "unknown"' 2>/dev/null)
+        preview=$(echo "$pane_info" | jq -r '.terminal_title_stripped // empty' 2>/dev/null)
+        echo "Puppy [$label]: ${live:-unknown} (workspace $ws_id)${cwd:+ — $cwd}${preview:+ — \"$preview\"}"
+      done <<< "$ws_lines"
     fi
 
     usage_line=$("$bin/usage.sh" --pct 2>/dev/null || echo "|||")
@@ -166,18 +211,26 @@ case "$cmd" in
     fi
     echo
 
-    tasks_dir="$puppy_dir/data/tasks"
-    if [[ ! -d "$tasks_dir" ]] || [[ -z "$(ls -A "$tasks_dir" 2>/dev/null)" ]]; then
+    task_files=()
+    while IFS= read -r d; do
+      [[ -z "$d" ]] && continue
+      for f in "$d"/tasks/*.json; do
+        [[ -e "$f" ]] && task_files+=("$f")
+      done
+    done < <(puppy_all_data_dirs)
+
+    if [[ ${#task_files[@]} -eq 0 ]]; then
       echo "No hay pups registrados."
       exit 0
     fi
-    printf "%-20s %-10s %-10s %-30s %-14s %s\n" "PUP" "ESTADO" "LIVE" "REPO#BRANCH" "PR" "PREVIEW"
-    for f in "$tasks_dir"/*.json; do
+    printf "%-20s %-10s %-10s %-30s %-14s %-20s %s\n" "PUP" "ESTADO" "LIVE" "REPO#BRANCH" "PR" "PROYECTO" "PREVIEW"
+    for f in "${task_files[@]}"; do
       task_id=$(jq -r '.task_id' "$f")
       status=$(jq -r '.status' "$f")
       repo_branch=$(jq -r '(.repo | split("/") | last) + "#" + .branch' "$f")
       pane_id=$(jq -r '.pane_id // empty' "$f")
       pr=$(jq -r 'if .pr.number then "#\(.pr.number) \(.pr.state)" else "-" end' "$f")
+      project=$(jq -r 'if .project_dir then (.project_dir | split("/") | last) else "-" end' "$f")
 
       live="-"
       preview="-"
@@ -188,7 +241,7 @@ case "$cmd" in
           preview=$(echo "$pup_pane" | jq -r '.terminal_title_stripped // "-"')
         fi
       fi
-      printf "%-20s %-10s %-10s %-30s %-14s %s\n" "$task_id" "$status" "$live" "$repo_branch" "$pr" "$preview"
+      printf "%-20s %-10s %-10s %-30s %-14s %-20s %s\n" "$task_id" "$status" "$live" "$repo_branch" "$pr" "$project" "$preview"
     done
     ;;
   status)
@@ -196,7 +249,8 @@ case "$cmd" in
       echo "uso: puppy status <pup-id>" >&2
       exit 1
     fi
-    jq . "$puppy_dir/data/tasks/$1.json"
+    task_file=$(puppy_find_task "$1") || exit 1
+    jq . "$task_file"
     ;;
   watchers)
     exec "$bin/watchers.sh" "$@"
@@ -207,11 +261,7 @@ case "$cmd" in
       exit 1
     fi
     pup_id=$1; shift
-    task_file="$puppy_dir/data/tasks/$pup_id.json"
-    if [[ ! -f "$task_file" ]]; then
-      echo "error: no existe $task_file" >&2
-      exit 1
-    fi
+    task_file=$(puppy_find_task "$pup_id") || exit 1
     pane_id=$(jq -r '.pane_id // empty' "$task_file")
     if [[ -z "$pane_id" ]]; then
       echo "error: no hay pane_id registrado para '$pup_id'" >&2
@@ -227,9 +277,11 @@ case "$cmd" in
 uso: puppy <comando> [args]
 
 comandos:
-  start [--resume|--fresh]                            abre (o enfoca) la sesión del puppy principal;
-                                                       sin flag pregunta si hay sesión previa que reanudar
-  stop                                                 termina el proceso de puppy y cierra su workspace
+  start [project-dir] [--resume|--fresh]              abre (o enfoca) la sesión de puppy para el proyecto dado
+                                                       (por defecto el cwd); sin flag pregunta si hay sesión
+                                                       previa de ese proyecto que reanudar
+  stop [project-dir]                                   termina el proceso de puppy del proyecto dado
+                                                       (por defecto el cwd) y cierra su workspace
   spawn <pup-id> <repo-path> <branch> <prompt...>   lanza un pup (worktree + worker)
   pr <pup-id> [-- args de gh pr create]             pushea y abre PR
   rm <pup-id> [--force]                             borra worktree + registro del pup
