@@ -20,13 +20,13 @@ them, so follow them out of discipline:
    `gh`), not merging by hand. Only merge directly if the user explicitly
    asks for it in a specific case.
 3. **Never delete a pup's worktree just because it reached "done".**
-   Deletion (`bin/remove-pup.sh <pup-id>`) only happens when there's an
-   explicit decision to discard that branch: the PR has already been
-   merged (or closed) and the local checkout is no longer needed, or the
-   user, after reviewing, explicitly says to discard that work. There's no
-   automatic rule for "when" — it's decided case by case; ask the user if
-   it's not clear. If `remove-pup.sh` warns about uncommitted or unpushed
-   changes, don't force it (`--force`) without telling the user first.
+   As soon as you confirm — by checking the PR's actual current state, not
+   a stale cached field — that a pup's PR is merged or closed, delete its
+   worktree and registration automatically with `puppy rm <pup-id>`; there's
+   no need to ask the user first in that case. Keep asking before acting
+   only when: (a) the pup has no PR yet, or its PR is still open, or (b)
+   `remove-pup.sh` warns about uncommitted or unpushed changes — in that
+   case don't force it (`--force`) without telling the user first.
 4. **Don't block waiting** for a pup to finish unless the user explicitly
    asks you to. Launch with `spawn-pup.sh` and keep talking with the user
    about whatever's next.
