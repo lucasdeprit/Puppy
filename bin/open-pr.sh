@@ -3,9 +3,9 @@ set -euo pipefail
 
 # open-pr.sh <pup-id> [-- <extra gh pr create args>]
 #
-# Pushea la rama de la tarea y abre un PR con `gh pr create`. No fusiona
-# nada directamente: el flujo por defecto es PR, no merge directo. Guarda
-# la URL del PR en data/tasks/<pup-id>.json.
+# Pushes the task's branch and opens a PR with `gh pr create`. Doesn't merge
+# anything directly: the default flow is PR, not direct merge. Saves the
+# PR URL in data/tasks/<pup-id>.json.
 
 if [[ $# -lt 1 ]]; then
   echo "uso: open-pr.sh <pup-id> [-- <extra gh pr create args>]" >&2

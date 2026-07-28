@@ -3,9 +3,9 @@ set -euo pipefail
 
 # spawn-pup.sh <pup-id> <repo-path> <branch> <prompt...>
 #
-# Crea un worktree aislado para <repo-path>, arranca un worker Claude dentro,
-# le manda el prompt, y lanza watch-pup.sh en background para avisar al
-# puppy cuando termine. No bloquea.
+# Creates an isolated worktree for <repo-path>, starts a Claude worker inside
+# it, sends it the prompt, and launches watch-pup.sh in the background to
+# notify puppy when it finishes. Non-blocking.
 
 if [[ $# -lt 4 ]]; then
   echo "uso: spawn-pup.sh <pup-id> <repo-path> <branch> <prompt...>" >&2
@@ -40,10 +40,10 @@ if [[ -z "$puppy_pane" ]]; then
   exit 1
 fi
 
-# Antes de crear el worktree, comprobamos si la rama destino ya está en uso.
-# Si ya hay un worktree con esa rama checked out, abortamos con un mensaje
-# claro en vez de dejar que 'herdr worktree create' (o el git subyacente)
-# falle con un error crudo.
+# Before creating the worktree, check whether the target branch is already
+# in use. If a worktree already has that branch checked out, abort with a
+# clear message instead of letting 'herdr worktree create' (or the
+# underlying git) fail with a raw error.
 existing_wt_path=$(git -C "$repo" worktree list --porcelain | awk -v b="refs/heads/$branch" '
   /^worktree / { path=$2 }
   /^branch / { if ($2 == b) print path }
@@ -53,11 +53,11 @@ if [[ -n "$existing_wt_path" ]]; then
   exit 1
 fi
 
-# Si la rama existe pero no está en ningún worktree (p. ej. quedó de un
-# intento anterior cuyo worktree ya se borró), la dejamos pasar en vez de
-# abortar: es un caso legítimo y 'herdr worktree create' la reutilizará como
-# base en vez de crear una rama nueva. Solo avisamos para que quede
-# constancia en el log del pup de que no se parte de una rama nueva.
+# If the branch exists but isn't in any worktree (e.g. left over from a
+# previous attempt whose worktree was already deleted), let it pass instead
+# of aborting: it's a legitimate case and 'herdr worktree create' will reuse
+# it as a base instead of creating a new branch. We just warn so it's on
+# record in the pup log that we're not starting from a fresh branch.
 if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
   echo "aviso: la rama '$branch' ya existe (sin worktree activo); se reutilizará" >&2
 fi
@@ -72,9 +72,9 @@ pane=$(echo "$create_json" | jq -r '.result.root_pane.pane_id')
 workspace=$(echo "$create_json" | jq -r '.result.workspace.workspace_id')
 worktree_path=$(echo "$create_json" | jq -r '.result.worktree.path')
 
-# Si el repo destino trae su propia infraestructura de conocimiento/memoria
-# (por convención, no específico de ningún proyecto), se lo indicamos al
-# worker en el propio prompt en vez de tocar el repo real.
+# If the target repo brings its own knowledge/memory infrastructure (by
+# convention, not specific to any project), we tell the worker about it in
+# the prompt itself instead of touching the real repo.
 context_preamble=""
 if [[ -f "$worktree_path/open-knowledge/map.md" ]]; then
   context_preamble+="Antes de nada, lee open-knowledge/map.md en la raíz de este repo: contiene las reglas no negociables y el enrutador de tareas de este proyecto. Sigue esas reglas y consulta solo los documentos que ese mapa te indique para tu tarea concreta.
@@ -88,7 +88,7 @@ if [[ -f "$worktree_path/.engram/config.json" ]]; then
 fi
 full_prompt="${context_preamble}${prompt}"
 
-# El pane recién creado puede tardar un instante en estar listo.
+# The newly created pane may take a moment to be ready.
 started=0
 for attempt in 1 2 3 4 5; do
   if herdr agent start "$task_id" --kind claude --pane "$pane" -- --permission-mode acceptEdits >/dev/null 2>&1; then
@@ -102,11 +102,11 @@ if [[ "$started" -ne 1 ]]; then
   exit 1
 fi
 
-# El pane puede reportarse "idle" e interactive_ready=true antes de que la UI
-# de Claude Code haya terminado de renderizar y esté realmente aceptando
-# teclas: un envío inmediato del prompt se puede perder en silencio. Usamos
-# --wait --until working para confirmar que el prompt realmente disparó al
-# worker, y reintentamos si no.
+# The pane may report "idle" and interactive_ready=true before the Claude
+# Code UI has finished rendering and is really accepting keystrokes: sending
+# the prompt immediately can silently get lost. We use --wait --until
+# working to confirm the prompt actually triggered the worker, and retry if
+# not.
 prompted=0
 for attempt in 1 2 3 4 5; do
   if herdr agent prompt "$pane" "$full_prompt" --wait --until working --timeout 5000 >/dev/null 2>&1; then

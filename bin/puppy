@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# puppy — entry point global de la herramienta, llamable desde cualquier repo.
-# Un "pup" es un worker: un agente Claude Code corriendo aislado en su propio
-# git worktree, lanzado y supervisado por el puppy principal (este agente).
+# puppy — global entry point of the tool, callable from any repo.
+# A "pup" is a worker: a Claude Code agent running isolated in its own
+# git worktree, launched and supervised by the main puppy (this agent).
 #
-# uso:
+# usage:
 #   puppy start [--resume|--fresh]
 #   puppy stop
 #   puppy spawn <pup-id> <repo-path> <branch> <prompt...>
-#   puppy pr <pup-id> [-- <args extra de gh pr create>]
+#   puppy pr <pup-id> [-- <extra gh pr create args>]
 #   puppy rm <pup-id> [--force]
 #   puppy supervise [pup-id ...]
 #   puppy ls
@@ -34,9 +34,9 @@ case "$cmd" in
 
     existing_ws=$(herdr workspace list | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
 
-    # Si el modo no vino forzado por flag, pregunta (solo si hay a quién
-    # preguntarle: una terminal interactiva). En modo no interactivo,
-    # por defecto se reanuda para no romper automatizaciones.
+    # If the mode wasn't forced by a flag, ask (only if there's someone
+    # to ask: an interactive terminal). In non-interactive mode, default
+    # to resume so automations don't break.
     if [[ -z "$mode" ]]; then
       if [[ -t 0 && -t 1 ]]; then
         if [[ -n "$existing_ws" ]]; then
@@ -91,11 +91,12 @@ case "$cmd" in
       echo "Puppy arrancado en workspace $ws_id (pane $pane_id), cwd=$puppy_dir"
     fi
 
-    # Si esta terminal no está ya adjunta a herdr (p. ej. se llamó desde un
-    # Terminal.app normal), adjúntala ahora: así el usuario ve la ventana de
-    # herdr con el workspace de puppy ya enfocado, en vez de tener que ir a
-    # buscarla a mano. Si ya estamos dentro de un pane de herdr (HERDR_ENV=1,
-    # p. ej. llamando `puppy start` desde otro pup), no hace falta.
+    # If this terminal isn't already attached to herdr (e.g. it was called
+    # from a plain Terminal.app), attach it now: this way the user sees the
+    # herdr window with the puppy workspace already focused, instead of
+    # having to go find it manually. If we're already inside a herdr pane
+    # (HERDR_ENV=1, e.g. calling `puppy start` from another pup), it's not
+    # needed.
     if [[ -z "${HERDR_ENV:-}" ]]; then
       exec herdr
     fi

@@ -3,15 +3,15 @@ set -euo pipefail
 
 # watchers.sh [--json]
 #
-# Lista los procesos watch-pup.sh en ejecución y detecta huérfanos en ambas
-# direcciones:
-#   1. Un watch-pup.sh corriendo cuyo pup-id ya no tiene
-#      data/tasks/<id>.json (el pup fue borrado con 'puppy rm' pero el
-#      watcher se quedó vivo).
-#   2. Un pup con status "started" cuyo watcher_pid registrado ya no está
-#      vivo (el watcher murió sin actualizar el estado del pup).
+# Lists running watch-pup.sh processes and detects orphans in both
+# directions:
+#   1. A running watch-pup.sh whose pup-id no longer has a
+#      data/tasks/<id>.json (the pup was deleted with 'puppy rm' but the
+#      watcher stayed alive).
+#   2. A pup with status "started" whose recorded watcher_pid is no longer
+#      alive (the watcher died without updating the pup's state).
 #
-# Compatible con bash 3.2 (macOS): no usa arrays asociativos.
+# Compatible with bash 3.2 (macOS): doesn't use associative arrays.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 puppy_dir="$(dirname "$script_dir")"
@@ -25,12 +25,12 @@ is_alive() {
   [[ -n "$pid" && "$pid" != "null" ]] && kill -0 "$pid" 2>/dev/null
 }
 
-# Cada línea: "<pid> <task_id>" para cada watch-pup.sh vivo.
+# Each line: "<pid> <task_id>" for each live watch-pup.sh.
 running_list=$(pgrep -fl 'watch-pup\.sh' 2>/dev/null | awk '{print $1, $NF}' || true)
 
 results=()
 
-# Dirección 1: watcher corriendo sin task file.
+# Direction 1: watcher running without a task file.
 if [[ -n "$running_list" ]]; then
   while IFS=' ' read -r pid tid; do
     [[ -z "$pid" ]] && continue
@@ -42,7 +42,7 @@ if [[ -n "$running_list" ]]; then
   done <<< "$running_list"
 fi
 
-# Dirección 2: pup "started" cuyo watcher_pid ya no está vivo.
+# Direction 2: pup "started" whose watcher_pid is no longer alive.
 if [[ -d "$tasks_dir" ]]; then
   for f in "$tasks_dir"/*.json; do
     [[ -e "$f" ]] || continue
