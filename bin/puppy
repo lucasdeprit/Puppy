@@ -149,12 +149,13 @@ case "$cmd" in
       echo "No hay pups registrados."
       exit 0
     fi
-    printf "%-20s %-10s %-10s %-30s %s\n" "PUP" "ESTADO" "LIVE" "REPO#BRANCH" "PREVIEW"
+    printf "%-20s %-10s %-10s %-30s %-14s %s\n" "PUP" "ESTADO" "LIVE" "REPO#BRANCH" "PR" "PREVIEW"
     for f in "$tasks_dir"/*.json; do
       task_id=$(jq -r '.task_id' "$f")
       status=$(jq -r '.status' "$f")
       repo_branch=$(jq -r '(.repo | split("/") | last) + "#" + .branch' "$f")
       pane_id=$(jq -r '.pane_id // empty' "$f")
+      pr=$(jq -r 'if .pr.number then "#\(.pr.number) \(.pr.state)" else "-" end' "$f")
 
       live="-"
       preview="-"
@@ -165,7 +166,7 @@ case "$cmd" in
           preview=$(echo "$pup_pane" | jq -r '.terminal_title_stripped // "-"')
         fi
       fi
-      printf "%-20s %-10s %-10s %-30s %s\n" "$task_id" "$status" "$live" "$repo_branch" "$preview"
+      printf "%-20s %-10s %-10s %-30s %-14s %s\n" "$task_id" "$status" "$live" "$repo_branch" "$pr" "$preview"
     done
     ;;
   status)

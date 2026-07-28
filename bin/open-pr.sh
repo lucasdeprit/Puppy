@@ -44,7 +44,14 @@ git -C "$worktree_path" push -u origin "$branch"
 
 pr_url=$(cd "$worktree_path" && gh pr create --fill "${extra_args[@]}" 2>&1 | tail -1)
 
+pr_json=$(cd "$worktree_path" && gh pr view "$branch" --json url,number,state 2>/dev/null || echo '{}')
+pr_number=$(echo "$pr_json" | jq -r '.number // empty')
+pr_state=$(echo "$pr_json" | jq -r '.state // "OPEN"')
+pr_url=$(echo "$pr_json" | jq -r --arg fallback "$pr_url" '.url // $fallback')
+
 tmp_file=$(mktemp)
-jq --arg pr_url "$pr_url" '.pr_url = $pr_url' "$task_file" > "$tmp_file" && mv "$tmp_file" "$task_file"
+jq --arg pr_url "$pr_url" --arg pr_number "$pr_number" --arg pr_state "$pr_state" \
+  '.pr_url = $pr_url | .pr = {url: $pr_url, number: ($pr_number | if . == "" then null else tonumber end), state: $pr_state}' \
+  "$task_file" > "$tmp_file" && mv "$tmp_file" "$task_file"
 
 echo "PR abierto para '$task_id': $pr_url"
