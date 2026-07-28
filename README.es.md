@@ -1,10 +1,10 @@
 # Puppy
 
-Read this in English: [README.md](README.md)
+Leer en inglés: [README.md](README.md)
 
 Puppy es un agente principal que orquesta **pups**: workers Claude Code que
 corren aislados en sus propios git worktrees, gestionados a través de
-[herdr](https://github.com/anthropics). Puppy nunca toca los repos reales
+[herdr](https://herdr.dev). Puppy nunca toca los repos reales
 directamente — delega todo cambio de código en los pups.
 
 ## Instalación
