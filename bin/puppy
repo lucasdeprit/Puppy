@@ -151,7 +151,19 @@ case "$cmd" in
     five_pct="${usage_pct%%|*}"
     week_pct="${usage_pct##*|}"
     if [[ -n "$five_pct" || -n "$week_pct" ]]; then
-      echo "Suscripción: 5h ${five_pct:-?}% · 7d ${week_pct:-?}%"
+      if [[ -t 1 ]]; then
+        GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; RESET=$'\033[0m'
+      else
+        GREEN=""; YELLOW=""; RED=""; RESET=""
+      fi
+      pct_color() {
+        local p="${1:-0}"
+        if (( p >= 80 )); then echo "$RED"
+        elif (( p >= 50 )); then echo "$YELLOW"
+        else echo "$GREEN"
+        fi
+      }
+      echo "Suscripción: 5h $(pct_color "${five_pct:-0}")${five_pct:-?}%${RESET} · 7d $(pct_color "${week_pct:-0}")${week_pct:-?}%${RESET}"
     fi
     echo
 
