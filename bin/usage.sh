@@ -46,6 +46,33 @@ bar() {
   echo "${color}${out}${RESET}"
 }
 
+time_left() {
+  # $1 = reset string as printed by `/usage`, e.g. "Jul 28 at 12:20pm (Europe/Madrid)"
+  # Prints "Xh Ym" until reset, or nothing if it can't be parsed (e.g. non-macOS
+  # date, unexpected format) — callers should treat that as "unavailable".
+  local reset_str="$1" tz clean year epoch now diff
+  tz=$(echo "$reset_str" | sed -n 's/.*(\(.*\))/\1/p')
+  clean=$(echo "$reset_str" | sed -E 's/ \([^)]*\)$//')
+  [[ -z "$tz" || -z "$clean" ]] && return 1
+  # On-the-hour resets print without minutes (e.g. "1am" instead of
+  # "1:00am") — normalize so the fixed-format parse below always matches.
+  if [[ ! "$clean" =~ : ]]; then
+    clean=$(echo "$clean" | sed -E 's/([0-9]+)(am|pm)$/\1:00\2/')
+  fi
+  year=$(date +%Y)
+  epoch=$(TZ="$tz" date -j -f "%b %d at %I:%M%p %Y" "$clean $year" +%s 2>/dev/null) || return 1
+  now=$(date +%s)
+  diff=$(( epoch - now ))
+  # If the parsed date already passed this year (e.g. reset is in January but
+  # today is December), it actually falls next year.
+  if (( diff < -86400 )); then
+    epoch=$(TZ="$tz" date -j -f "%b %d at %I:%M%p %Y" "$clean $((year + 1))" +%s 2>/dev/null) || return 1
+    diff=$(( epoch - now ))
+  fi
+  (( diff < 0 )) && diff=0
+  echo "$(( diff / 3600 ))h $(( (diff % 3600) / 60 ))m"
+}
+
 result=$(claude -p "/usage" --output-format json 2>/dev/null | jq -r '.result // empty')
 
 five_pct=$(echo "$result" | sed -n 's/^Current session: \([0-9]*\)% used.*/\1/p')
@@ -53,8 +80,13 @@ five_reset=$(echo "$result" | sed -n 's/^Current session: [0-9]*% used · resets
 week_pct=$(echo "$result" | sed -n 's/^Current week[^:]*: \([0-9]*\)% used.*/\1/p')
 week_reset=$(echo "$result" | sed -n 's/^Current week[^:]*: [0-9]*% used · resets \(.*\)/\1/p')
 
+five_left=""
+week_left=""
+[[ -n "$five_reset" ]] && five_left=$(time_left "$five_reset" || true)
+[[ -n "$week_reset" ]] && week_left=$(time_left "$week_reset" || true)
+
 if [[ "${1:-}" == "--pct" ]]; then
-  echo "${five_pct}|${week_pct}"
+  echo "${five_pct}|${week_pct}|${five_left}|${week_left}"
   exit 0
 fi
 
@@ -64,10 +96,10 @@ if [[ -z "$five_pct" && -z "$week_pct" ]]; then
 fi
 
 if [[ -n "$five_pct" ]]; then
-  echo "5h  [$(bar "$five_pct" 20)] $(color_for "$five_pct")${five_pct}%${RESET} (resets ${five_reset})"
+  echo "5h  [$(bar "$five_pct" 20)] $(color_for "$five_pct")${five_pct}%${RESET} (resets ${five_reset}${five_left:+ · in $five_left})"
 fi
 if [[ -n "$week_pct" ]]; then
-  echo "7d  [$(bar "$week_pct" 20)] $(color_for "$week_pct")${week_pct}%${RESET} (resets ${week_reset})"
+  echo "7d  [$(bar "$week_pct" 20)] $(color_for "$week_pct")${week_pct}%${RESET} (resets ${week_reset}${week_left:+ · in $week_left})"
 fi
 
 breakdown=$(echo "$result" | sed -n '/What.s contributing/,$p')

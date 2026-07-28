@@ -147,9 +147,8 @@ case "$cmd" in
       echo "Puppy: cerrado (sin workspace abierto)"
     fi
 
-    usage_pct=$("$bin/usage.sh" --pct 2>/dev/null || echo "|")
-    five_pct="${usage_pct%%|*}"
-    week_pct="${usage_pct##*|}"
+    usage_line=$("$bin/usage.sh" --pct 2>/dev/null || echo "|||")
+    IFS='|' read -r five_pct week_pct five_left week_left <<< "$usage_line"
     if [[ -n "$five_pct" || -n "$week_pct" ]]; then
       if [[ -t 1 ]]; then
         GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; RESET=$'\033[0m'
@@ -163,7 +162,7 @@ case "$cmd" in
         else echo "$GREEN"
         fi
       }
-      echo "Suscripción: 5h $(pct_color "${five_pct:-0}")${five_pct:-?}%${RESET} · 7d $(pct_color "${week_pct:-0}")${week_pct:-?}%${RESET}"
+      echo "Suscripción: 5h $(pct_color "${five_pct:-0}")${five_pct:-?}%${RESET}${five_left:+ (${five_left})} · 7d $(pct_color "${week_pct:-0}")${week_pct:-?}%${RESET}${week_left:+ (${week_left})}"
     fi
     echo
 
