@@ -39,12 +39,17 @@ them, so follow them out of discipline:
    `bin/puppy` or the individual scripts.** The global dispatcher is on
    the PATH (`~/.local/bin/puppy` → `bin/puppy`) precisely for that;
    typing the path by hand is unnecessary and fragile if the repo moves.
+8. **Check `puppy usage` before spawning a large batch of pups.** Each pup
+   is a separate Claude Code process against the same Claude Pro
+   subscription quota. If the 5-hour window is already critically high,
+   warn the user instead of spawning more pups that would just queue or
+   fail.
 
 ## Commands
 
 There's a global `puppy` dispatcher (symlink at `~/.local/bin/puppy` →
 `bin/puppy`, callable from any directory) that wraps everything below:
-`puppy start|stop|spawn|pr|rm|supervise|ls|status|watchers|tell`.
+`puppy start|stop|spawn|pr|rm|supervise|ls|status|watchers|tell|usage`.
 
 - `puppy start [--resume|--fresh]` — opens (or focuses) the main puppy
   session's herdr workspace. With no flag, it asks whether to resume a
@@ -77,6 +82,9 @@ There's a global `puppy` dispatcher (symlink at `~/.local/bin/puppy` →
 - `puppy tell <pup-id> <text>` — sends a follow-up instruction to a running
   or idle pup via `herdr agent prompt`, looking up its pane from
   `data/tasks/<pup-id>.json`.
+- `puppy usage` — reports Claude Pro subscription usage (5-hour session
+  window and 7-day weekly window), via `claude -p "/usage"`. `puppy ls`'s
+  header also shows a compact version of this.
 
 ## Repos with their own agentic ecosystem (e.g. burmuin)
 

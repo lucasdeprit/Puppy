@@ -16,6 +16,7 @@ set -euo pipefail
 #   puppy status <pup-id>
 #   puppy watchers
 #   puppy tell <pup-id> <text>
+#   puppy usage
 
 puppy_dir="$HOME/puppy"
 bin="$puppy_dir/bin"
@@ -145,6 +146,24 @@ case "$cmd" in
     else
       echo "Puppy: cerrado (sin workspace abierto)"
     fi
+
+    usage_line=$("$bin/usage.sh" --pct 2>/dev/null || echo "|||")
+    IFS='|' read -r five_pct week_pct five_left week_left <<< "$usage_line"
+    if [[ -n "$five_pct" || -n "$week_pct" ]]; then
+      if [[ -t 1 ]]; then
+        GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; RESET=$'\033[0m'
+      else
+        GREEN=""; YELLOW=""; RED=""; RESET=""
+      fi
+      pct_color() {
+        local p="${1:-0}"
+        if (( p >= 80 )); then echo "$RED"
+        elif (( p >= 50 )); then echo "$YELLOW"
+        else echo "$GREEN"
+        fi
+      }
+      echo "Suscripción: 5h $(pct_color "${five_pct:-0}")${five_pct:-?}%${RESET}${five_left:+ (${five_left})} · 7d $(pct_color "${week_pct:-0}")${week_pct:-?}%${RESET}${week_left:+ (${week_left})}"
+    fi
     echo
 
     tasks_dir="$puppy_dir/data/tasks"
@@ -200,6 +219,9 @@ case "$cmd" in
     fi
     herdr agent prompt "$pane_id" "$*"
     ;;
+  usage)
+    exec "$bin/usage.sh" "$@"
+    ;;
   *)
     cat >&2 <<'EOF'
 uso: puppy <comando> [args]
@@ -216,6 +238,7 @@ comandos:
   status <pup-id>                                     muestra la metadata completa de un pup
   watchers                                            lista watch-pup.sh vivos y detecta huérfanos
   tell <pup-id> <text>                                envía una instrucción de seguimiento a un pup en marcha
+  usage                                                muestra el uso de la suscripción Claude Pro (5h/7d)
 EOF
     exit 1
     ;;
