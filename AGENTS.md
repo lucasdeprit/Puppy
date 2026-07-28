@@ -44,7 +44,7 @@ them, so follow them out of discipline:
 
 There's a global `puppy` dispatcher (symlink at `~/.local/bin/puppy` →
 `bin/puppy`, callable from any directory) that wraps everything below:
-`puppy start|stop|spawn|pr|rm|supervise|ls|status|watchers`.
+`puppy start|stop|spawn|pr|rm|supervise|ls|status|watchers|tell`.
 
 - `puppy start [--resume|--fresh]` — opens (or focuses) the main puppy
   session's herdr workspace. With no flag, it asks whether to resume a
@@ -74,6 +74,9 @@ There's a global `puppy` dispatcher (symlink at `~/.local/bin/puppy` →
   full metadata of one.
 - `puppy watchers` — lists live `watch-pup.sh` processes and detects
   orphans.
+- `puppy tell <pup-id> <text>` — sends a follow-up instruction to a running
+  or idle pup via `herdr agent prompt`, looking up its pane from
+  `data/tasks/<pup-id>.json`.
 
 ## Repos with their own agentic ecosystem (e.g. burmuin)
 
