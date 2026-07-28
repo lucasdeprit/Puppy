@@ -33,7 +33,8 @@ them, so follow them out of discipline:
 5. **When a pup finishes**, you get a notification injected directly into
    this conversation (via `herdr agent prompt`, triggered by
    `watch-pup.sh` in the background). Before reporting to the user, check
-   `data/tasks/<id>.json` and `data/events.log` for more context — the
+   its `tasks/<id>.json` and `events.log` (`puppy status <id>`, or see
+   "Persistent state" below for the path) for more context — the
    notification itself is just a bell, not the result detail.
 6. Use `bin/supervise.sh` only if the user explicitly asks to wait
    synchronously for some in-flight pup to finish.
@@ -53,11 +54,23 @@ There's a global `puppy` dispatcher (symlink at `~/.local/bin/puppy` →
 `bin/puppy`, callable from any directory) that wraps everything below:
 `puppy start|stop|spawn|pr|rm|supervise|ls|status|watchers|tell|usage`.
 
-- `puppy start [--resume|--fresh]` — opens (or focuses) the main puppy
-  session's herdr workspace. With no flag, it asks whether to resume a
-  previous session if one exists (or defaults to resume in non-interactive
-  mode).
-- `puppy stop` — kills the puppy process and closes its workspace.
+Puppy's own installation (`bin/`, this file) is fixed at a single location.
+The *active project* — the folder this session orchestrates over — is
+per-session instead: by default the cwd `puppy start` was run from, kept
+around as `PUPPY_PROJECT_DIR` even if the agent later `cd`s elsewhere. This
+means several projects can each have their own concurrent puppy session,
+each with its own pup state (see "Persistent state" below).
+
+- `puppy start [project-dir] [--resume|--fresh]` — opens (or focuses) the
+  puppy session's herdr workspace for `project-dir` (default: the current
+  directory). With no flag, it asks whether to resume a previous session
+  for that same project if one exists (or defaults to resume in
+  non-interactive mode). On a genuinely new conversation (`--fresh` or a
+  fresh answer, never on `--resume`), it sends itself the message that
+  makes it Puppy: read `AGENTS.md` and treat `project-dir` as the active
+  project for the session.
+- `puppy stop [project-dir]` — kills the puppy process for `project-dir`
+  (default: the current directory) and closes its workspace.
 - `bin/spawn-pup.sh <pup-id> <repo-path> <branch> <prompt...>` (`puppy spawn`)
   — creates the worktree, starts the pup, sends it the prompt, and
   launches the watcher in the background. If the target repo has
@@ -103,9 +116,20 @@ in parallel.
 
 ## Persistent state
 
+Per-project data lives outside any repo, under
+`~/.local/share/puppy/projects/<slug>/data/`, where `<slug>` is derived from
+the active project's path (see `bin/lib/project.sh`):
+
 - `data/tasks/<pup-id>.json` — per-pup metadata: repo, branch, worktree,
-  panes, prompt, status.
+  panes, prompt, status, and the `project_dir` it was spawned from.
 - `data/events.log` — append-only history of status changes.
+
+Because multiple projects can have concurrent puppy sessions, commands that
+operate on a specific pup (`status`, `tell`, `pr`, `rm`, `supervise`,
+`watchers`) look up `tasks/<pup-id>.json` across every project's data
+directory, not just the active one — a pup can be managed from a session
+other than the one that spawned it. `ls` and `watchers` are global views
+that aggregate across all projects for the same reason.
 
 ## Parallelism
 

@@ -14,8 +14,7 @@ set -euo pipefail
 # Compatible with bash 3.2 (macOS): doesn't use associative arrays.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-puppy_dir="$(dirname "$script_dir")"
-tasks_dir="$puppy_dir/data/tasks"
+source "$script_dir/lib/project.sh"
 
 json_out=0
 [[ "${1:-}" == "--json" ]] && json_out=1
@@ -30,12 +29,12 @@ running_list=$(pgrep -fl 'watch-pup\.sh' 2>/dev/null | awk '{print $1, $NF}' || 
 
 results=()
 
-# Direction 1: watcher running without a task file.
+# Direction 1: watcher running without a task file (a pup can be
+# registered under any project's data dir, not just the current one).
 if [[ -n "$running_list" ]]; then
   while IFS=' ' read -r pid tid; do
     [[ -z "$pid" ]] && continue
-    task_file="$tasks_dir/$tid.json"
-    if [[ ! -f "$task_file" ]]; then
+    if ! puppy_find_task "$tid" >/dev/null 2>&1; then
       results+=("$(jq -n --arg pid "$pid" --arg task_id "$tid" --arg reason "no_task_file" \
         '{pid: ($pid|tonumber), task_id: $task_id, orphan: true, reason: $reason}')")
     fi
@@ -43,8 +42,9 @@ if [[ -n "$running_list" ]]; then
 fi
 
 # Direction 2: pup "started" whose watcher_pid is no longer alive.
-if [[ -d "$tasks_dir" ]]; then
-  for f in "$tasks_dir"/*.json; do
+while IFS= read -r d; do
+  [[ -z "$d" ]] && continue
+  for f in "$d/tasks"/*.json; do
     [[ -e "$f" ]] || continue
     task_id=$(jq -r '.task_id' "$f")
     status=$(jq -r '.status' "$f")
@@ -58,7 +58,7 @@ if [[ -d "$tasks_dir" ]]; then
         '{pid: ($pid|tonumber), task_id: $task_id, orphan: true, reason: $reason}')")
     fi
   done
-fi
+done < <(puppy_all_data_dirs)
 
 if [[ $json_out -eq 1 ]]; then
   if [[ ${#results[@]} -eq 0 ]]; then
@@ -75,11 +75,11 @@ if [[ -z "$running_list" ]]; then
 else
   while IFS=' ' read -r pid tid; do
     [[ -z "$pid" ]] && continue
-    task_file="$tasks_dir/$tid.json"
-    if [[ -f "$task_file" ]]; then
+    task_file=$(puppy_find_task "$tid" 2>/dev/null) || task_file=""
+    if [[ -n "$task_file" ]]; then
       echo "  pid=$pid pup=$tid"
     else
-      echo "  pid=$pid pup=$tid  <-- HUÉRFANO (sin $task_file)"
+      echo "  pid=$pid pup=$tid  <-- HUÉRFANO (sin tasks/$tid.json en ningún proyecto)"
     fi
   done <<< "$running_list"
 fi
@@ -87,8 +87,9 @@ fi
 echo
 echo "Pups 'started' sin watcher vivo:"
 found_dead=0
-if [[ -d "$tasks_dir" ]]; then
-  for f in "$tasks_dir"/*.json; do
+while IFS= read -r d; do
+  [[ -z "$d" ]] && continue
+  for f in "$d/tasks"/*.json; do
     [[ -e "$f" ]] || continue
     task_id=$(jq -r '.task_id' "$f")
     status=$(jq -r '.status' "$f")
@@ -102,5 +103,5 @@ if [[ -d "$tasks_dir" ]]; then
       found_dead=1
     fi
   done
-fi
+done < <(puppy_all_data_dirs)
 [[ $found_dead -eq 0 ]] && echo "  (ninguno)"

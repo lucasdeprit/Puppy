@@ -19,13 +19,9 @@ force=0
 [[ "${2:-}" == "--force" ]] && force=1
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-puppy_dir="$(dirname "$script_dir")"
-task_file="$puppy_dir/data/tasks/$task_id.json"
+source "$script_dir/lib/project.sh"
 
-if [[ ! -f "$task_file" ]]; then
-  echo "error: no existe $task_file" >&2
-  exit 1
-fi
+task_file=$(puppy_find_task "$task_id") || exit 1
 
 worktree_path=$(jq -r '.worktree_path' "$task_file")
 workspace=$(jq -r '.workspace_id' "$task_file")
