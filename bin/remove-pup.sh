@@ -52,6 +52,12 @@ else
   fi
 fi
 
-herdr worktree remove --workspace "$workspace" --json
+remove_json=$(herdr worktree remove --workspace "$workspace" --json)
+if [[ $? -ne 0 ]] || echo "$remove_json" | jq -e '.error' >/dev/null 2>&1; then
+  echo "error eliminando el worktree: $(echo "$remove_json" | jq -r '.error.message // "fallo desconocido"')" >&2
+  echo "no se borró el registro de la tarea; podés reintentar o investigar." >&2
+  exit 1
+fi
+
 rm -f "$task_file"
 echo "Tarea '$task_id' y su worktree han sido eliminados."
