@@ -10,19 +10,22 @@
 input=$(cat)
 
 bar() {
-  # $1 = percentage (integer or float), prints a 5-cell ascii bar
-  local pct="$1"
+  # $1 = percentage (integer or float), $2 = color code for the filled
+  # portion. Prints a 5-cell bar using solid unicode blocks (█ filled,
+  # ░ empty, dim), matching Claude Code's own /statusline preview style.
+  local pct="$1" color="$2"
   local pct_int
   pct_int=$(printf '%.0f' "$pct" 2>/dev/null || echo 0)
   local filled=$(( pct_int / 20 ))
   [ "$filled" -gt 5 ] && filled=5
   [ "$filled" -lt 0 ] && filled=0
   local empty=$(( 5 - filled ))
-  local out=""
+  local out="$color"
   local i
-  for ((i=0; i<filled; i++)); do out="${out}#"; done
-  for ((i=0; i<empty; i++)); do out="${out}-"; done
-  echo "$out"
+  for ((i=0; i<filled; i++)); do out="${out}█"; done
+  out="${out}${RESET}${DIM}"
+  for ((i=0; i<empty; i++)); do out="${out}░"; done
+  printf '%s' "$out"
 }
 
 five=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
@@ -80,8 +83,8 @@ segment() {
   local label="$1" pct="$2" resets_at="$3" pct_r color cd
   pct_r=$(printf '%.0f' "$pct")
   color=$(color_for "$pct_r")
-  printf '%s: %s%s%%%s%s [%s%s%s]' \
-    "$label" "$color" "$pct_r" "$RESET" "$DIM" "$color" "$(bar "$pct")" "$RESET$DIM"
+  printf '%s: %s%s%%%s [%s%s]' \
+    "$label" "$color" "$pct_r" "$RESET" "$(bar "$pct" "$color")" "$RESET$DIM"
   if [ -n "$resets_at" ]; then
     cd=$(countdown "$resets_at")
     [ -n "$cd" ] && printf ' (%s)' "$cd"

@@ -15,9 +15,9 @@ set -euo pipefail
 # Color only when writing to a real terminal (not piped into a file/other
 # script), so 'puppy usage --pct' and redirected output stay plain text.
 if [[ -t 1 ]]; then
-  GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; RESET=$'\033[0m'
+  GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; DIM=$'\033[2m'; RESET=$'\033[0m'
 else
-  GREEN=""; YELLOW=""; RED=""; RESET=""
+  GREEN=""; YELLOW=""; RED=""; DIM=""; RESET=""
 fi
 
 color_for() {
@@ -31,7 +31,9 @@ color_for() {
 }
 
 bar() {
-  # $1 = percentage, $2 = bar width in cells
+  # $1 = percentage, $2 = bar width in cells. Solid unicode blocks (█ filled,
+  # ░ empty), colored by severity — filled portion in its threshold color,
+  # empty portion dim, matching Claude Code's own /statusline preview style.
   local pct="$1" width="$2"
   local pct_int filled empty out i color
   pct_int=$(printf '%.0f' "$pct" 2>/dev/null || echo 0)
@@ -40,10 +42,11 @@ bar() {
   [ "$filled" -lt 0 ] && filled=0
   empty=$(( width - filled ))
   color=$(color_for "$pct")
-  out=""
-  for ((i=0; i<filled; i++)); do out="${out}#"; done
-  for ((i=0; i<empty; i++)); do out="${out}-"; done
-  echo "${color}${out}${RESET}"
+  out="${color}"
+  for ((i=0; i<filled; i++)); do out="${out}█"; done
+  out="${out}${RESET}${DIM}"
+  for ((i=0; i<empty; i++)); do out="${out}░"; done
+  echo "${out}${RESET}"
 }
 
 time_left() {
