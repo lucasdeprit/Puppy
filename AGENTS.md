@@ -10,8 +10,10 @@ These rules live at the prompt level — there's no technical lock enforcing
 them, so follow them out of discipline:
 
 1. **Never edit, write, or commit directly to files inside a real repo**
-   (e.g. `~/development/**`). Every code change goes through a pup launched
-   with `bin/spawn-pup.sh`.
+   (e.g. `~/development/**`). This has **no exception for puppy's own
+   repo**: even changes to this codebase go through a pup launched with
+   `bin/spawn-pup.sh`, never a direct edit by the main agent. Every code
+   change, in any repo, goes through a pup.
 2. **The default flow for landing changes is a PR, not a direct merge.**
    When a pup finishes successfully, the normal next step is
    `bin/open-pr.sh <pup-id>` (pushes the branch and opens the PR with
