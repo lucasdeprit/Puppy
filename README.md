@@ -20,10 +20,17 @@ any directory.
 
 ## Commands
 
-- `puppy start [--resume|--fresh]` — opens (or focuses) the main puppy
-  session; with no flag, asks whether to resume a previous session if one
-  exists.
-- `puppy stop` — kills the puppy process and closes its workspace.
+- `puppy start [<name>] [--fresh]` — opens (or focuses) a named puppy
+  session. With no name, in a tty it shows a picker of registered
+  sessions (plus the option to create a new one); non-interactively it
+  defaults to the name `puppy`. `--fresh` starts that name over with a
+  brand-new conversation instead of resuming.
+- `puppy stop [<name>]` — closes that session's workspace (its
+  registration stays, so it's resumable later). With no name, only works
+  if exactly one session is open.
+- `puppy forget <name> [--force]` — stops the session (if open) and
+  deletes its registration entirely. Prompts for confirmation in a tty;
+  requires `--force` otherwise.
 - `puppy spawn <pup-id> <repo-path> <branch> <prompt...>` — launches a pup
   (worktree + worker).
 - `puppy pr <pup-id> [-- <extra gh pr create args>]` — pushes the branch and

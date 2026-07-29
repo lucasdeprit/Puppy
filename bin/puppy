@@ -4,10 +4,13 @@ set -euo pipefail
 # puppy — global entry point of the tool, callable from any repo.
 # A "pup" is a worker: a Claude Code agent running isolated in its own
 # git worktree, launched and supervised by the main puppy (this agent).
+# A "session" is a named main-agent (puppy itself) conversation — separate
+# from pups, registered in data/sessions/<name>.json.
 #
 # usage:
-#   puppy start [--resume|--fresh]
-#   puppy stop
+#   puppy start [<name>] [--fresh]
+#   puppy stop [<name>]
+#   puppy forget <name> [--force]
 #   puppy spawn <pup-id> <repo-path> <branch> <prompt...>
 #   puppy pr <pup-id> [-- <extra gh pr create args>]
 #   puppy rm <pup-id> [--force]
@@ -26,76 +29,69 @@ cmd="${1:-}"
 
 case "$cmd" in
   start)
-    mode=""
+    fresh=0
+    name=""
     for arg in "$@"; do
       case "$arg" in
-        --fresh) mode="fresh" ;;
-        --resume) mode="resume" ;;
+        --fresh) fresh=1 ;;
+        --resume) ;; # kept as a no-op for old muscle memory; resume is the only non-fresh mode now
+        *) name="$arg" ;;
       esac
     done
 
-    existing_ws=$(herdr workspace list | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
-
-    # If the mode wasn't forced by a flag, ask (only if there's someone
-    # to ask: an interactive terminal). In non-interactive mode, default
-    # to resume so automations don't break.
-    if [[ -z "$mode" ]]; then
+    if [[ -z "$name" ]]; then
       if [[ -t 0 && -t 1 ]]; then
-        if [[ -n "$existing_ws" ]]; then
-          read -r -p "Puppy ya está abierto (workspace $existing_ws). ¿Reanudar [r] o cerrarlo y empezar de cero [c]? [r]: " answer
+        # Interactive picker: list known named sessions (main-agent only,
+        # never pups), most-recently-started first, plus an option to
+        # create a new one.
+        rows=()
+        while IFS= read -r line; do
+          [[ -n "$line" ]] && rows+=("$line")
+        done < <("$bin/sessions.sh" list)
+        if [[ "${#rows[@]}" -eq 0 ]]; then
+          name="puppy"
         else
-          read -r -p "No hay workspace abierto, pero sí historial en disco. ¿Reanudar esa conversación [r] o empezar de cero [c]? [r]: " answer
+          echo "Sesiones de Puppy:"
+          i=1
+          for row in "${rows[@]}"; do
+            IFS=$'\t' read -r r_name r_sid r_status r_ws r_num r_agent r_last <<< "$row"
+            if [[ "$r_status" == "open" ]]; then
+              echo "  $i) $r_name — abierta (posición $r_num, $r_agent)"
+            else
+              echo "  $i) $r_name — cerrada (última vez: $r_last)"
+            fi
+            i=$((i + 1))
+          done
+          echo "  n) nueva sesión"
+          read -r -p "Elige una sesión [1]: " choice
+          choice="${choice:-1}"
+          if [[ "$choice" == "n" || "$choice" == "N" ]]; then
+            read -r -p "Nombre de la nueva sesión: " name
+            if [[ -z "$name" ]]; then
+              echo "error: nombre vacío" >&2
+              exit 1
+            fi
+          elif [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le "${#rows[@]}" ]]; then
+            IFS=$'\t' read -r name _ <<< "${rows[$((choice - 1))]}"
+          else
+            echo "error: opción inválida" >&2
+            exit 1
+          fi
         fi
-        case "$answer" in
-          c|C|cerrar|close|fresh) mode="fresh" ;;
-          *) mode="resume" ;;
-        esac
       else
-        mode="resume"
+        # Non-tty: preserve today's implicit contract for any existing
+        # automation calling bare `puppy start`.
+        name="puppy"
       fi
     fi
 
-    if [[ "$mode" == "fresh" && -n "$existing_ws" ]]; then
-      echo "Cerrando workspace previo de Puppy ($existing_ws)..."
-      herdr workspace close "$existing_ws" >/dev/null 2>&1 || true
-      existing_ws=""
-    fi
-
-    if [[ "$mode" == "resume" && -n "$existing_ws" ]]; then
-      herdr workspace focus "$existing_ws" >/dev/null
-      echo "Puppy ya estaba abierto (workspace $existing_ws), lo he enfocado."
-    else
-      ws_json=$(herdr workspace create --cwd "$puppy_dir" --label puppy --focus)
-      if echo "$ws_json" | jq -e '.error' >/dev/null 2>&1; then
-        echo "error creando el workspace de Puppy: $(echo "$ws_json" | jq -r '.error.message')" >&2
-        exit 1
-      fi
-      ws_id=$(echo "$ws_json" | jq -r '.result.workspace.workspace_id // .result.workspace_id')
-      pane_id=$(echo "$ws_json" | jq -r '.result.pane.pane_id // .result.root_pane.pane_id')
-
-      started=0
-      for attempt in 1 2 3 4 5; do
-        if [[ "$mode" == "fresh" ]]; then
-          agent_ok=$(herdr agent start puppy --kind claude --pane "$pane_id" >/dev/null 2>&1 && echo 1 || echo 0)
-        else
-          agent_ok=$(herdr agent start puppy --kind claude --pane "$pane_id" -- --continue >/dev/null 2>&1 && echo 1 || echo 0)
-        fi
-        if [[ "$agent_ok" == "1" ]]; then
-          started=1
-          break
-        fi
-        sleep 1
-      done
-      if [[ "$started" -ne 1 ]]; then
-        echo "error: workspace creado (id $ws_id) pero no se pudo arrancar Claude Code en el pane $pane_id" >&2
-        exit 1
-      fi
-      echo "Puppy arrancado en workspace $ws_id (pane $pane_id), cwd=$puppy_dir"
-    fi
+    start_args=("$name")
+    [[ "$fresh" -eq 1 ]] && start_args+=(--fresh)
+    "$bin/sessions.sh" start "${start_args[@]}"
 
     # If this terminal isn't already attached to herdr (e.g. it was called
     # from a plain Terminal.app), attach it now: this way the user sees the
-    # herdr window with the puppy workspace already focused, instead of
+    # herdr window with the session workspace already focused, instead of
     # having to go find it manually. If we're already inside a herdr pane
     # (HERDR_ENV=1, e.g. calling `puppy start` from another pup), it's not
     # needed.
@@ -104,23 +100,40 @@ case "$cmd" in
     fi
     ;;
   stop)
-    existing_ws=$(herdr workspace list | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
-    if [[ -z "$existing_ws" ]]; then
-      echo "No hay sesión de Puppy abierta."
-      exit 0
-    fi
-
-    pane_id=$(herdr pane list --workspace "$existing_ws" 2>/dev/null | jq -r '.result.panes[0].pane_id // empty')
-    if [[ -n "$pane_id" ]]; then
-      pid=$(herdr pane process-info --pane "$pane_id" 2>/dev/null \
-        | jq -r '.result.process_info.foreground_processes[]? | select(.name=="claude") | .pid' | head -1)
-      if [[ -n "$pid" ]]; then
-        kill "$pid" 2>/dev/null || true
+    if [[ $# -ge 1 ]]; then
+      "$bin/sessions.sh" stop "$1"
+    else
+      rows=()
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && rows+=("$line")
+      done < <("$bin/sessions.sh" list | awk -F'\t' '$3=="open"')
+      if [[ "${#rows[@]}" -eq 0 ]]; then
+        echo "No hay sesión de Puppy abierta."
+        exit 0
+      elif [[ "${#rows[@]}" -eq 1 ]]; then
+        IFS=$'\t' read -r only_name _ <<< "${rows[0]}"
+        "$bin/sessions.sh" stop "$only_name"
+      else
+        names=()
+        for row in "${rows[@]}"; do
+          IFS=$'\t' read -r r_name _ <<< "$row"
+          names+=("$r_name")
+        done
+        joined=""
+        for n in "${names[@]}"; do
+          joined="${joined:+$joined, }$n"
+        done
+        echo "hay varias sesiones de puppy abiertas ($joined) — usa 'puppy stop <name>'" >&2
+        exit 1
       fi
     fi
-
-    herdr workspace close "$existing_ws" >/dev/null 2>&1 || true
-    echo "Puppy detenido (workspace $existing_ws cerrado)."
+    ;;
+  forget)
+    if [[ $# -lt 1 ]]; then
+      echo "uso: puppy forget <name> [--force]" >&2
+      exit 1
+    fi
+    exec "$bin/sessions.sh" forget "$@"
     ;;
   spawn)
     exec "$bin/spawn-pup.sh" "$@"
@@ -137,14 +150,22 @@ case "$cmd" in
   ls)
     all_panes=$(herdr pane list 2>/dev/null || echo '{}')
 
-    ws_id=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[] | select(.label=="puppy") | .workspace_id' | head -1)
-    if [[ -n "$ws_id" ]]; then
-      pane_info=$(echo "$all_panes" | jq -c --arg w "$ws_id" '.result.panes[]? | select(.workspace_id==$w)' | head -1)
-      live=$(echo "$pane_info" | jq -r '.agent_status // "unknown"' 2>/dev/null)
-      preview=$(echo "$pane_info" | jq -r '.terminal_title_stripped // empty' 2>/dev/null)
-      echo "Puppy: ${live:-unknown} (workspace $ws_id)${preview:+ — \"$preview\"}"
+    session_rows=()
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && session_rows+=("$line")
+    done < <("$bin/sessions.sh" list)
+    if [[ "${#session_rows[@]}" -eq 0 ]]; then
+      echo "Puppy: cerrado (sin sesiones registradas)"
     else
-      echo "Puppy: cerrado (sin workspace abierto)"
+      printf "%-16s %-8s %-8s %-8s %s\n" "SESIÓN" "ESTADO" "LIVE" "POSICIÓN" "DETALLE"
+      for row in "${session_rows[@]}"; do
+        IFS=$'\t' read -r s_name s_sid s_status s_ws s_num s_agent s_last <<< "$row"
+        if [[ "$s_status" == "open" ]]; then
+          printf "%-16s %-8s %-8s %-8s workspace %s\n" "$s_name" "abierta" "$s_agent" "$s_num" "$s_ws"
+        else
+          printf "%-16s %-8s %-8s %-8s última vez: %s\n" "$s_name" "cerrada" "-" "-" "$s_last"
+        fi
+      done
     fi
 
     usage_line=$("$bin/usage.sh" --pct 2>/dev/null || echo "|||")
@@ -227,14 +248,20 @@ case "$cmd" in
 uso: puppy <comando> [args]
 
 comandos:
-  start [--resume|--fresh]                            abre (o enfoca) la sesión del puppy principal;
-                                                       sin flag pregunta si hay sesión previa que reanudar
-  stop                                                 termina el proceso de puppy y cierra su workspace
+  start [<name>] [--fresh]                            abre (o enfoca) una sesión nombrada del puppy principal;
+                                                       sin nombre y en tty, muestra un picker con las sesiones
+                                                       registradas; sin tty, usa "puppy" por defecto
+  stop [<name>]                                        termina esa sesión y cierra su workspace (el registro
+                                                       queda, sigue siendo reanudable); sin nombre, sólo si hay
+                                                       exactamente una sesión abierta
+  forget <name> [--force]                              detiene la sesión (si está abierta) y borra su registro
+                                                       data/sessions/<name>.json; en tty pide confirmación, si no
+                                                       requiere --force
   spawn <pup-id> <repo-path> <branch> <prompt...>   lanza un pup (worktree + worker)
   pr <pup-id> [-- args de gh pr create]             pushea y abre PR
   rm <pup-id> [--force]                             borra worktree + registro del pup
   supervise [pup-id ...]                             espera (sondeo) a que resuelva algún pup
-  ls                                                  lista pups registrados + estado de la sesión de puppy
+  ls                                                  lista sesiones registradas + pups registrados
   status <pup-id>                                     muestra la metadata completa de un pup
   watchers                                            lista watch-pup.sh vivos y detecta huérfanos
   tell <pup-id> <text>                                envía una instrucción de seguimiento a un pup en marcha

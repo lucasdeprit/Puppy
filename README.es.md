@@ -20,9 +20,17 @@ llamable desde cualquier directorio.
 
 ## Comandos
 
-- `puppy start [--resume|--fresh]` — abre (o enfoca) la sesión del puppy
-  principal; sin flag, pregunta si hay una sesión previa que reanudar.
-- `puppy stop` — termina el proceso de puppy y cierra su workspace.
+- `puppy start [<name>] [--fresh]` — abre (o enfoca) una sesión nombrada
+  del puppy principal. Sin nombre, en tty muestra un picker con las
+  sesiones registradas (con opción de crear una nueva); sin tty usa por
+  defecto el nombre `puppy`. `--fresh` arranca esa sesión desde cero con
+  una conversación nueva en vez de reanudar.
+- `puppy stop [<name>]` — cierra el workspace de esa sesión (su registro
+  queda, sigue siendo reanudable). Sin nombre, sólo funciona si hay
+  exactamente una sesión abierta.
+- `puppy forget <name> [--force]` — detiene la sesión (si está abierta) y
+  borra su registro por completo. Pide confirmación en tty; requiere
+  `--force` si no.
 - `puppy spawn <pup-id> <repo-path> <branch> <prompt...>` — lanza un pup
   (worktree + worker).
 - `puppy pr <pup-id> [-- <args extra de gh pr create>]` — pushea la rama y

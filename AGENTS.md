@@ -51,13 +51,29 @@ them, so follow them out of discipline:
 
 There's a global `puppy` dispatcher (symlink at `~/.local/bin/puppy` →
 `bin/puppy`, callable from any directory) that wraps everything below:
-`puppy start|stop|spawn|pr|rm|supervise|ls|status|watchers|tell|usage`.
+`puppy start|stop|forget|spawn|pr|rm|supervise|ls|status|watchers|tell|usage`.
 
-- `puppy start [--resume|--fresh]` — opens (or focuses) the main puppy
-  session's herdr workspace. With no flag, it asks whether to resume a
-  previous session if one exists (or defaults to resume in non-interactive
-  mode).
-- `puppy stop` — kills the puppy process and closes its workspace.
+- `puppy start [<name>] [--fresh]` — opens (or focuses) a named
+  main-agent session's herdr workspace (a "session" here means puppy
+  itself, not a pup — separate registry, `data/sessions/<name>.json`).
+  With no name, in a tty it shows a picker of registered sessions
+  (main-agent only, never pups) plus the option to create a new one;
+  non-interactively it defaults to the name `puppy`, same implicit
+  contract bare `puppy start` had before this existed. `--fresh` starts
+  that name over with a brand-new conversation (new stored session id)
+  instead of resuming. Resuming always uses `claude --resume "$uuid"`
+  against a session id stored per name — never `--continue`, which
+  resumes by cwd and can silently grab the wrong conversation (e.g. one
+  left behind by `bin/usage.sh`'s own non-interactive `claude -p` calls
+  from the same directory).
+- `puppy stop [<name>]` — closes that session's workspace; its
+  registration file stays, so the name is still resumable later. With no
+  name, only works if exactly one session is currently open (errors
+  asking for a name if more than one is open).
+- `puppy forget <name> [--force]` — stops the session (if open, ignoring
+  "wasn't open") and then deletes its `data/sessions/<name>.json`. Prompts
+  for confirmation in a tty; requires `--force` outside one. Never touches
+  `data/tasks/*.json` (pups) — separate namespace.
 - `bin/spawn-pup.sh <pup-id> <repo-path> <branch> <prompt...>` (`puppy spawn`)
   — creates the worktree, starts the pup, sends it the prompt, and
   launches the watcher in the background. If the target repo has
@@ -105,6 +121,9 @@ in parallel.
 
 - `data/tasks/<pup-id>.json` — per-pup metadata: repo, branch, worktree,
   panes, prompt, status.
+- `data/sessions/<name>.json` — per-named-session registry for the main
+  puppy agent (not pups): stored `session_id` (uuid), `cwd`,
+  `created_at`, `last_started_at`. Separate namespace from `data/tasks/`.
 - `data/events.log` — append-only history of status changes.
 
 ## Parallelism
