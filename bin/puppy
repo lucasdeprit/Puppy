@@ -28,6 +28,94 @@ puppy_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 bin="$puppy_dir/bin"
 source "$bin/lib/project.sh"
 
+# puppy_pick_project_dir — interactive picker for `puppy start` when it's
+# called with no project-dir argument from a real terminal. Lists both the
+# currently open puppy-* workspaces (via herdr) and the known projects with
+# saved data but no workspace open right now, numbered, and lets the user
+# either pick one by number or type a path to open/create a new project.
+# Prints the chosen absolute project dir on stdout; all prompts/listing go to
+# stderr so this composes with `project_dir=$(puppy_pick_project_dir)`.
+puppy_pick_project_dir() {
+  local all_panes ws_lines
+  local -a paths=()
+  local -a open_slugs=()
+  local idx=1
+
+  all_panes=$(herdr pane list 2>/dev/null || echo '{}')
+  ws_lines=$(herdr workspace list 2>/dev/null | jq -c '.result.workspaces[]? | select(.label | test("^puppy-"))')
+
+  echo "Sesiones de Puppy conocidas:" >&2
+  if [[ -n "$ws_lines" ]]; then
+    while IFS= read -r ws; do
+      [[ -z "$ws" ]] && continue
+      local ws_id label cwd pane_info status slug
+      ws_id=$(echo "$ws" | jq -r '.workspace_id')
+      label=$(echo "$ws" | jq -r '.label')
+      cwd=$(echo "$ws" | jq -r '.worktree.checkout_path // empty')
+      pane_info=$(echo "$all_panes" | jq -c --arg w "$ws_id" '.result.panes[]? | select(.workspace_id==$w)' | head -1)
+      status=$(echo "$pane_info" | jq -r '.agent_status // "unknown"' 2>/dev/null)
+      slug="${label#puppy-}"
+      open_slugs+=("$slug")
+      paths[$idx]="$cwd"
+      printf "  %d) [abierto, %s] %s%s\n" "$idx" "$status" "$label" "${cwd:+ — $cwd}" >&2
+      idx=$((idx + 1))
+    done <<< "$ws_lines"
+  fi
+
+  local proj
+  while IFS= read -r proj; do
+    [[ -z "$proj" ]] && continue
+    local slug path already_open=0 s
+    slug="${proj%%$'\t'*}"
+    path="${proj#*$'\t'}"
+    for s in "${open_slugs[@]:-}"; do
+      [[ "$s" == "$slug" ]] && already_open=1 && break
+    done
+    [[ "$already_open" -eq 1 ]] && continue
+    paths[$idx]="$path"
+    if [[ -n "$path" ]]; then
+      printf "  %d) [cerrado] %s\n" "$idx" "$path" >&2
+    else
+      printf "  %d) [cerrado] (ruta desconocida, slug %s)\n" "$idx" "$slug" >&2
+    fi
+    idx=$((idx + 1))
+  done < <(puppy_all_projects)
+
+  if [[ "$idx" -eq 1 ]]; then
+    echo "  (ninguna todavía)" >&2
+  fi
+  echo >&2
+
+  local answer chosen
+  read -r -p "Elige un número para abrir esa sesión, o escribe una ruta para un proyecto nuevo/existente: " answer
+
+  if [[ "$answer" =~ ^[0-9]+$ ]]; then
+    if [[ -z "${paths[$answer]+set}" ]]; then
+      echo "error: no existe la opción $answer." >&2
+      return 1
+    fi
+    chosen="${paths[$answer]}"
+    if [[ -z "$chosen" ]]; then
+      echo "error: no se conoce la ruta original de esa sesión; abrila pasándole el directorio directamente a 'puppy start <dir>'." >&2
+      return 1
+    fi
+    (cd "$chosen" && pwd -P)
+    return 0
+  fi
+
+  if [[ -z "$answer" ]]; then
+    echo "error: no se eligió ningún proyecto." >&2
+    return 1
+  fi
+
+  if [[ ! -d "$answer" ]]; then
+    echo "error: '$answer' no es un directorio." >&2
+    return 1
+  fi
+
+  (cd "$answer" && pwd -P)
+}
+
 cmd="${1:-}"
 [[ $# -gt 0 ]] && shift || true
 
@@ -43,7 +131,15 @@ case "$cmd" in
       esac
     done
 
-    project_dir="$(cd "${project_arg:-$PWD}" && pwd -P)"
+    # Only offer the interactive picker for the bare "no directory argument"
+    # case, and only when there's a real terminal to drive it — an explicit
+    # `puppy start <dir>` or a non-interactive call keeps operating directly
+    # on that dir (or $PWD) exactly as before.
+    if [[ -z "$project_arg" && -t 0 && -t 1 ]]; then
+      project_dir=$(puppy_pick_project_dir) || exit 1
+    else
+      project_dir="$(cd "${project_arg:-$PWD}" && pwd -P)"
+    fi
     slug=$(puppy_project_slug "$project_dir")
     label="puppy-$slug"
 
@@ -209,6 +305,9 @@ case "$cmd" in
     herdr workspace close "$existing_ws" >/dev/null 2>&1 || true
     echo "Puppy detenido (workspace $existing_ws cerrado)."
     ;;
+  forget)
+    exec "$bin/forget-project.sh" "$@"
+    ;;
   spawn)
     exec "$bin/spawn-pup.sh" "$@"
     ;;
@@ -357,11 +456,17 @@ case "$cmd" in
 uso: puppy <comando> [args]
 
 comandos:
-  start [project-dir] [--resume|--fresh]              abre (o enfoca) la sesión de puppy para el proyecto dado
-                                                       (por defecto el cwd); sin flag pregunta si hay sesión
-                                                       previa de ese proyecto que reanudar
+  start [project-dir] [--resume|--fresh]              abre (o enfoca) la sesión de puppy para el proyecto dado;
+                                                       sin project-dir y en una terminal interactiva, muestra un
+                                                       picker con las sesiones conocidas (abiertas o con datos
+                                                       guardados) para elegir una o dar una ruta nueva; sin flag
+                                                       pregunta si hay sesión previa de ese proyecto que reanudar
   stop [project-dir]                                   termina el proceso de puppy del proyecto dado
                                                        (por defecto el cwd) y cierra su workspace
+  forget [project-dir] [--force]                       stop + borra todos los datos guardados del
+                                                       proyecto dado (por defecto el cwd): tasks,
+                                                       events.log, todo. Avisa si hay pups sin
+                                                       terminar (ni done ni merged)
   spawn <pup-id> <repo-path> <branch> <prompt...>   lanza un pup (worktree + worker)
   pr <pup-id> [-- args de gh pr create]             pushea y abre PR
   rm <pup-id> [--force]                             borra worktree + registro del pup

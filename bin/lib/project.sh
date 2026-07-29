@@ -31,14 +31,25 @@ puppy_project_slug() {
   echo "${base}-${hash}"
 }
 
+# puppy_project_path_file <slug> — path to the file that records the
+# original absolute project directory for the given slug, so it can be
+# recovered later (e.g. by the `puppy start` picker) even with no workspace
+# open and no task spawned yet to read a project_dir field from.
+puppy_project_path_file() {
+  local slug="$1"
+  echo "$HOME/.local/share/puppy/projects/$slug/project_path"
+}
+
 # puppy_data_dir [dir] — ~/.local/share/puppy/projects/<slug>/data for the
-# given project dir (default: puppy_project_dir). Creates it if missing.
+# given project dir (default: puppy_project_dir). Creates it if missing, and
+# (re)records the project's original path alongside it.
 puppy_data_dir() {
   local dir="${1:-$(puppy_project_dir)}"
   local slug data_dir
   slug=$(puppy_project_slug "$dir")
   data_dir="$HOME/.local/share/puppy/projects/$slug/data"
   mkdir -p "$data_dir"
+  printf '%s\n' "$dir" > "$(puppy_project_path_file "$slug")"
   echo "$data_dir"
 }
 
@@ -51,6 +62,24 @@ puppy_all_data_dirs() {
   local d
   for d in "$base"/*/data; do
     [[ -d "$d" ]] && echo "$d"
+  done
+}
+
+# puppy_all_projects — one line "<slug>\t<project-path-or-empty>" per known
+# project (one with a data dir on disk), regardless of whether it currently
+# has a herdr workspace open. Used by the `puppy start` picker and `puppy
+# forget`.
+puppy_all_projects() {
+  local base="$HOME/.local/share/puppy/projects"
+  [[ -d "$base" ]] || return 0
+  local slug_dir slug path_file path
+  for slug_dir in "$base"/*/; do
+    [[ -d "${slug_dir}data" ]] || continue
+    slug="$(basename "$slug_dir")"
+    path_file=$(puppy_project_path_file "$slug")
+    path=""
+    [[ -f "$path_file" ]] && path=$(<"$path_file")
+    printf '%s\t%s\n' "$slug" "$path"
   done
 }
 
