@@ -143,6 +143,13 @@ case "$cmd" in
     slug=$(puppy_project_slug "$project_dir")
     label="puppy-$slug"
 
+    # Register the project unconditionally as soon as we know we're really
+    # opening/focusing a session for it — not just when a pup happens to get
+    # spawned later. Otherwise a project where you only ever talk to Puppy
+    # without spawning any pup never gets a data dir or recorded path, and
+    # silently drops out of the start picker the moment its workspace closes.
+    puppy_data_dir "$project_dir" >/dev/null
+
     if [[ ! -d "$project_dir/.claude" ]]; then
       echo "aviso: $project_dir no tiene carpeta .claude" >&2
     fi
