@@ -31,6 +31,30 @@ puppy_project_slug() {
   echo "${base}-${hash}"
 }
 
+# puppy_herdr_session_for <project_dir> — the dedicated herdr session name
+# for the given project directory: "puppy-<slug>", the same string already
+# used as the workspace --label for that project. Reusing the string is
+# safe: --label and --session are separate namespaces in herdr.
+puppy_herdr_session_for() {
+  local dir="$1"
+  echo "puppy-$(puppy_project_slug "$dir")"
+}
+
+# puppy_herdr_session — the dedicated herdr session name for *this* session:
+# $PUPPY_HERDR_SESSION if set (the herdr workspace env var set by `puppy
+# start <dir>`), otherwise derived from puppy_project_dir. Same
+# env-var-or-derive pattern as puppy_project_dir itself.
+puppy_herdr_session() {
+  echo "${PUPPY_HERDR_SESSION:-$(puppy_herdr_session_for "$(puppy_project_dir)")}"
+}
+
+# puppy_running_herdr_sessions — one herdr session name per line, only those
+# currently running. Global, read-only, no side effects — always safe to
+# call (never triggers creation of a new session just by listing).
+puppy_running_herdr_sessions() {
+  herdr session list --json 2>/dev/null | jq -r '.sessions[]? | select(.running==true) | .name'
+}
+
 # puppy_project_path_file <slug> — path to the file that records the
 # original absolute project directory for the given slug, so it can be
 # recovered later (e.g. by the `puppy start` picker) even with no workspace
@@ -96,41 +120,42 @@ puppy_all_projects() {
   done
 }
 
-# puppy_find_workspace_by_label <label> — prints the workspace_id of the
-# (first) herdr workspace with the given label, if any.
+# puppy_find_workspace_by_label <label> <session> — prints the workspace_id
+# of the (first) herdr workspace with the given label in the given herdr
+# session, if any.
 puppy_find_workspace_by_label() {
-  local label="$1"
-  herdr workspace list | jq -r --arg label "$label" '.result.workspaces[] | select(.label==$label) | .workspace_id' | head -1
+  local label="$1" session="$2"
+  herdr --session "$session" workspace list | jq -r --arg label "$label" '.result.workspaces[] | select(.label==$label) | .workspace_id' | head -1
 }
 
-# puppy_workspace_first_pane <ws-id> — prints the workspace's first pane id,
-# if any.
+# puppy_workspace_first_pane <ws-id> <session> — prints the workspace's
+# first pane id, if any.
 puppy_workspace_first_pane() {
-  local ws_id="$1"
-  herdr pane list --workspace "$ws_id" 2>/dev/null | jq -r '.result.panes[0].pane_id // empty'
+  local ws_id="$1" session="$2"
+  herdr --session "$session" pane list --workspace "$ws_id" 2>/dev/null | jq -r '.result.panes[0].pane_id // empty'
 }
 
-# puppy_pane_claude_pid <pane-id> — prints the pid of the "claude" process
-# running in the given pane's foreground, if any (empty if there's none, or
-# the pane doesn't exist).
+# puppy_pane_claude_pid <pane-id> <session> — prints the pid of the "claude"
+# process running in the given pane's foreground, if any (empty if there's
+# none, or the pane doesn't exist).
 puppy_pane_claude_pid() {
-  local pane_id="$1"
+  local pane_id="$1" session="$2"
   [[ -z "$pane_id" ]] && return 0
-  herdr pane process-info --pane "$pane_id" 2>/dev/null \
+  herdr --session "$session" pane process-info --pane "$pane_id" 2>/dev/null \
     | jq -r '.result.process_info.foreground_processes[]? | select(.name=="claude") | .pid' | head -1
 }
 
-# puppy_workspace_alive <ws-id> — true if the workspace has a pane with a
-# live "claude" process in it. A herdr workspace can outlive the process
-# that ran inside it (e.g. it crashed without herdr closing the pane), so
-# finding the workspace by label isn't enough to know there's a real session
-# to resume.
+# puppy_workspace_alive <ws-id> <session> — true if the workspace has a pane
+# with a live "claude" process in it. A herdr workspace can outlive the
+# process that ran inside it (e.g. it crashed without herdr closing the
+# pane), so finding the workspace by label isn't enough to know there's a
+# real session to resume.
 puppy_workspace_alive() {
-  local ws_id="$1"
+  local ws_id="$1" session="$2"
   local pane_id pid
-  pane_id=$(puppy_workspace_first_pane "$ws_id")
+  pane_id=$(puppy_workspace_first_pane "$ws_id" "$session")
   [[ -z "$pane_id" ]] && return 1
-  pid=$(puppy_pane_claude_pid "$pane_id")
+  pid=$(puppy_pane_claude_pid "$pane_id" "$session")
   [[ -n "$pid" ]]
 }
 
@@ -154,10 +179,12 @@ puppy_claude_history_exists() {
 }
 
 # puppy_list_sessions — pure data enumerator, no prompts: everything goes to
-# stdout, nothing is asked interactively. Combines the herdr workspaces whose
-# label matches "^puppy-" (open right now) with the known projects that have
-# a saved data dir (via puppy_all_projects), deduplicated by slug — a session
-# that's both open and has saved data appears exactly once.
+# stdout, nothing is asked interactively. Combines the running herdr sessions
+# named "puppy-<slug>" (via puppy_running_herdr_sessions — always safe, it
+# only reports sessions herdr itself already considers running, never
+# triggers creating one) with the known projects that have a saved data dir
+# (via puppy_all_projects), deduplicated by slug — a session that's both
+# open and has saved data appears exactly once.
 #
 # Output contract: one TSV line per known puppy session, fields separated by
 # literal tabs, in this exact order:
@@ -191,10 +218,6 @@ puppy_claude_history_exists() {
 # `${line%%$'\t'*}` / `${line#*$'\t'}` instead — see puppy_pick_session below
 # for a worked example.
 puppy_list_sessions() {
-  local base="$HOME/.local/share/puppy/projects"
-  local ws_lines
-  ws_lines=$(herdr workspace list 2>/dev/null | jq -c '.result.workspaces[]? | select(.label | test("^puppy-"))')
-
   # slug -> project path, from every known project with saved data.
   local -A known_path=()
   local proj slug path
@@ -206,31 +229,31 @@ puppy_list_sessions() {
   done < <(puppy_all_projects)
 
   local -A seen=()
-  local ws ws_id label cwd alive has_history
-  if [[ -n "$ws_lines" ]]; then
-    while IFS= read -r ws; do
-      [[ -z "$ws" ]] && continue
-      ws_id=$(echo "$ws" | jq -r '.workspace_id')
-      label=$(echo "$ws" | jq -r '.label')
-      cwd=$(echo "$ws" | jq -r '.worktree.checkout_path // empty')
-      slug="${label#puppy-}"
-      seen["$slug"]=1
+  local sess ws ws_id cwd alive has_history
+  while IFS= read -r sess; do
+    [[ -z "$sess" ]] && continue
+    [[ "$sess" == puppy-* ]] || continue
+    slug="${sess#puppy-}"
+    ws=$(herdr --session "$sess" workspace list 2>/dev/null | jq -c --arg l "$sess" '.result.workspaces[]? | select(.label==$l)' | head -1)
+    [[ -z "$ws" ]] && continue
+    seen["$slug"]=1
 
-      path="${known_path[$slug]:-$cwd}"
+    ws_id=$(echo "$ws" | jq -r '.workspace_id')
+    cwd=$(echo "$ws" | jq -r '.worktree.checkout_path // empty')
+    path="${known_path[$slug]:-$cwd}"
 
-      alive=0
-      puppy_workspace_alive "$ws_id" && alive=1
+    alive=0
+    puppy_workspace_alive "$ws_id" "$sess" && alive=1
 
-      if [[ -n "$path" ]]; then
-        has_history=0
-        puppy_claude_history_exists "$path" && has_history=1
-      else
-        has_history="?"
-      fi
+    if [[ -n "$path" ]]; then
+      has_history=0
+      puppy_claude_history_exists "$path" && has_history=1
+    else
+      has_history="?"
+    fi
 
-      printf '%s\t%s\t%s\t%s\t%s\n' "$slug" "$path" "$ws_id" "$alive" "$has_history"
-    done <<< "$ws_lines"
-  fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$slug" "$path" "$ws_id" "$alive" "$has_history"
+  done < <(puppy_running_herdr_sessions)
 
   local s
   for s in "${!known_path[@]}"; do
