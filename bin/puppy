@@ -242,9 +242,9 @@ case "$cmd" in
         started=0
         for attempt in 1 2 3 4 5; do
           if [[ "$real_resume" -eq 1 ]]; then
-            agent_ok=$(herdr agent start puppy --kind claude --pane "$pane_id" -- --continue >/dev/null 2>&1 && echo 1 || echo 0)
+            agent_ok=$(herdr agent start "$label" --kind claude --pane "$pane_id" -- --continue >/dev/null 2>&1 && echo 1 || echo 0)
           else
-            agent_ok=$(herdr agent start puppy --kind claude --pane "$pane_id" >/dev/null 2>&1 && echo 1 || echo 0)
+            agent_ok=$(herdr agent start "$label" --kind claude --pane "$pane_id" >/dev/null 2>&1 && echo 1 || echo 0)
           fi
           if [[ "$agent_ok" == "1" ]]; then
             started=1
