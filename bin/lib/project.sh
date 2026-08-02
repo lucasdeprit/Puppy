@@ -140,6 +140,187 @@ puppy_claude_history_exists() {
   return 1
 }
 
+# puppy_list_sessions — pure data enumerator, no prompts: everything goes to
+# stdout, nothing is asked interactively. Combines the herdr workspaces whose
+# label matches "^puppy-" (open right now) with the known projects that have
+# a saved data dir (via puppy_all_projects), deduplicated by slug — a session
+# that's both open and has saved data appears exactly once.
+#
+# Output contract: one TSV line per known puppy session, fields separated by
+# literal tabs, in this exact order:
+#
+#   <slug>\t<path-or-empty>\t<workspace_id-or-empty>\t<alive:0-or-1>\t<has_history:0-or-1-or-?>
+#
+#   - slug:         the project slug (see puppy_project_slug).
+#   - path:         the known project_path for that slug, or empty if it was
+#                    never recorded (old orphaned sessions).
+#   - workspace_id: the open herdr workspace id for that slug's "puppy-<slug>"
+#                    label, or empty if there's no workspace open right now.
+#   - alive:        1 if there's a workspace AND puppy_workspace_alive says
+#                    it has a live claude process in it; 0 otherwise
+#                    (including "no workspace at all"). ALWAYS derived via
+#                    puppy_workspace_alive — never trust herdr's raw
+#                    agent_status for this: a workspace can stay "open" in
+#                    herdr with its claude process already dead (e.g. a pane
+#                    left running /bin/bash in the foreground, which herdr
+#                    reports as agent_status "unknown" but is not a live
+#                    session), so agent_status alone would lie here.
+#   - has_history:  0 or 1 from puppy_claude_history_exists "$path" when path
+#                    is known; the literal character "?" when path is empty,
+#                    since history can't be checked without knowing the
+#                    original directory.
+#
+# Parsing note for callers: path and workspace_id are frequently empty, and
+# `IFS=$'\t' read -r a b c d e` silently collapses runs of empty tab-fields
+# in bash (tab counts as "IFS whitespace" and gets collapsed even when IFS is
+# set to a lone tab — confirmed empirically, not just theoretical). Parse
+# each line as a whole (`IFS= read -r line`) and split fields with
+# `${line%%$'\t'*}` / `${line#*$'\t'}` instead — see puppy_pick_session below
+# for a worked example.
+puppy_list_sessions() {
+  local base="$HOME/.local/share/puppy/projects"
+  local ws_lines
+  ws_lines=$(herdr workspace list 2>/dev/null | jq -c '.result.workspaces[]? | select(.label | test("^puppy-"))')
+
+  # slug -> project path, from every known project with saved data.
+  local -A known_path=()
+  local proj slug path
+  while IFS= read -r proj; do
+    [[ -z "$proj" ]] && continue
+    slug="${proj%%$'\t'*}"
+    path="${proj#*$'\t'}"
+    known_path["$slug"]="$path"
+  done < <(puppy_all_projects)
+
+  local -A seen=()
+  local ws ws_id label cwd alive has_history
+  if [[ -n "$ws_lines" ]]; then
+    while IFS= read -r ws; do
+      [[ -z "$ws" ]] && continue
+      ws_id=$(echo "$ws" | jq -r '.workspace_id')
+      label=$(echo "$ws" | jq -r '.label')
+      cwd=$(echo "$ws" | jq -r '.worktree.checkout_path // empty')
+      slug="${label#puppy-}"
+      seen["$slug"]=1
+
+      path="${known_path[$slug]:-$cwd}"
+
+      alive=0
+      puppy_workspace_alive "$ws_id" && alive=1
+
+      if [[ -n "$path" ]]; then
+        has_history=0
+        puppy_claude_history_exists "$path" && has_history=1
+      else
+        has_history="?"
+      fi
+
+      printf '%s\t%s\t%s\t%s\t%s\n' "$slug" "$path" "$ws_id" "$alive" "$has_history"
+    done <<< "$ws_lines"
+  fi
+
+  local s
+  for s in "${!known_path[@]}"; do
+    [[ -n "${seen[$s]:-}" ]] && continue
+    path="${known_path[$s]}"
+    if [[ -n "$path" ]]; then
+      has_history=0
+      puppy_claude_history_exists "$path" && has_history=1
+    else
+      has_history="?"
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$s" "$path" "" "0" "$has_history"
+  done
+}
+
+# puppy_pick_session [--all|--open] — generic interactive picker built on top
+# of puppy_list_sessions. With --open, only sessions with alive=1 are listed
+# and selectable (e.g. there's no point offering to "stop" something that's
+# already closed); with --all (the default, same as no flag), every known
+# session is listed.
+#
+# Output contract: prints the numbered menu and every prompt to stderr (same
+# style/tone as bin/puppy's puppy_pick_project_dir), and prints ONLY the
+# chosen session's slug to stdout — never a path. Callers decide what to do
+# with the slug, including resolving its path if they need it. This function
+# does not support typing a free-form path for a new project; that's specific
+# to `puppy start` and stays in puppy_pick_project_dir. Returns 1 (with a
+# clear stderr message) if there's nothing to list, or the user doesn't pick
+# a valid option.
+puppy_pick_session() {
+  local filter="all"
+  case "${1:-}" in
+    --open) filter="open" ;;
+    --all|"") filter="all" ;;
+    *) echo "error: puppy_pick_session: opción desconocida '$1'" >&2; return 1 ;;
+  esac
+
+  local -a slugs=()
+  local -a paths=()
+  local idx=1
+  local line rest slug path ws_id alive has_history status_txt history_txt
+
+  # Parsed field-by-field with parameter expansion rather than
+  # `IFS=$'\t' read -r a b c d e`: bash's word-splitting treats tab as "IFS
+  # whitespace" and collapses runs of it even when IFS is set to a lone tab,
+  # which silently eats the empty path/workspace_id fields puppy_list_sessions
+  # emits. Whole-line read + %% / # expansion (same technique already used
+  # above for puppy_all_projects's 2-field TSV) sidesteps that entirely.
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    rest="$line"
+    slug="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    path="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    ws_id="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    alive="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    has_history="$rest"
+    [[ "$filter" == "open" && "$alive" != "1" ]] && continue
+
+    if [[ -n "$ws_id" ]]; then
+      if [[ "$alive" == "1" ]]; then
+        status_txt="abierto, vivo"
+      else
+        status_txt="abierto, sin proceso claude"
+      fi
+    else
+      status_txt="cerrado"
+    fi
+    case "$has_history" in
+      1) history_txt=", con historial" ;;
+      0) history_txt=", sin historial" ;;
+      *) history_txt="" ;;
+    esac
+
+    slugs[$idx]="$slug"
+    paths[$idx]="$path"
+    if [[ -n "$path" ]]; then
+      printf "  %d) [%s%s] %s — %s\n" "$idx" "$status_txt" "$history_txt" "$slug" "$path" >&2
+    else
+      printf "  %d) [%s%s] %s (ruta desconocida)\n" "$idx" "$status_txt" "$history_txt" "$slug" >&2
+    fi
+    idx=$((idx + 1))
+  done < <(puppy_list_sessions)
+
+  if [[ "$idx" -eq 1 ]]; then
+    if [[ "$filter" == "open" ]]; then
+      echo "error: no hay ninguna sesión de Puppy abierta." >&2
+    else
+      echo "error: no hay ninguna sesión de Puppy conocida." >&2
+    fi
+    return 1
+  fi
+
+  local answer
+  read -r -p "Elige un número: " answer
+
+  if [[ ! "$answer" =~ ^[0-9]+$ ]] || [[ -z "${slugs[$answer]+set}" ]]; then
+    echo "error: no se eligió ninguna sesión válida." >&2
+    return 1
+  fi
+
+  echo "${slugs[$answer]}"
+}
+
 # puppy_find_task <pup-id> — searches tasks/<pup-id>.json across every
 # project's data directory and prints the matching path on stdout. A pup
 # can be managed (status/tell/rm/pr) from a session other than the one that
