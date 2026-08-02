@@ -44,6 +44,16 @@ repo=$(jq -r '.repo' "$task_file")
 branch=$(jq -r '.branch' "$task_file")
 repo_name=$(basename "$repo")
 
+# $pane (the pup's own pane) and $puppy_pane (the main puppy pane that
+# launched it) always live in the same herdr session by construction — a pup
+# is only ever spawned from within its own project's session — so a single
+# session_args covers herdr calls against either one. Empty (falls back to
+# the implicit "default" session) for a task predating the herdr_session
+# field.
+herdr_session=$(jq -r '.herdr_session // empty' "$task_file")
+session_args=()
+[[ -n "$herdr_session" ]] && session_args=(--session "$herdr_session")
+
 # 'herdr agent wait' can fail on a transient hiccup (network, herdr itself)
 # instead of ever resolving to one of the --until statuses. Retry a few
 # times with a short backoff before giving up, same pattern as the
@@ -51,7 +61,7 @@ repo_name=$(basename "$repo")
 result=""
 wait_ok=0
 for attempt in 1 2 3 4 5; do
-  if result=$(herdr agent wait "$pane" --until done --until blocked --until unknown --until idle); then
+  if result=$(herdr "${session_args[@]}" agent wait "$pane" --until done --until blocked --until unknown --until idle); then
     wait_ok=1
     break
   fi
@@ -64,7 +74,7 @@ if [[ "$wait_ok" -ne 1 ]]; then
   # running fine, it's the watcher that gave up. Overwriting status would
   # misrepresent the pup as done/blocked/etc. when we simply don't know.
   echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id status=started watcher_error=wait_failed pane=$pane" >> "$events_log"
-  herdr agent prompt "$puppy_pane" \
+  herdr "${session_args[@]}" agent prompt "$puppy_pane" \
     "⚠️ El watcher del pup '$task_id' ($repo_name#$branch) falló tras varios intentos de 'herdr agent wait' y dejó de monitorearlo — el pup puede seguir corriendo, pero no hay forma automática de saber en qué estado quedó. Requiere revisión manual: revisá el pane $pane con 'puppy status $task_id' y considerá relanzar el watcher." \
     >/dev/null 2>&1 || true
   exit 1
@@ -77,6 +87,6 @@ jq --arg status "$status" '.status = $status' "$task_file" > "$tmp_file" && mv "
 
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id status=$status pane=$pane" >> "$events_log"
 
-herdr agent prompt "$puppy_pane" \
+herdr "${session_args[@]}" agent prompt "$puppy_pane" \
   "🐶 El pup '$task_id' ($repo_name#$branch) ha terminado con estado: $status. Revisa 'puppy status $task_id' y su events.log para más detalle." \
   >/dev/null 2>&1 || true

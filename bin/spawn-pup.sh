@@ -19,6 +19,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/lib/project.sh"
 
 project_dir="$(puppy_project_dir)"
+herdr_session="$(puppy_herdr_session)"
 data_dir="$(puppy_data_dir "$project_dir")"
 tasks_dir="$data_dir/tasks"
 events_log="$data_dir/events.log"
@@ -65,7 +66,7 @@ if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
   echo "aviso: la rama '$branch' ya existe (sin worktree activo); se reutilizará" >&2
 fi
 
-create_json=$(herdr worktree create --cwd "$repo" --branch "$branch" --no-focus --json)
+create_json=$(herdr --session "$herdr_session" worktree create --cwd "$repo" --branch "$branch" --no-focus --json)
 if echo "$create_json" | jq -e '.error' >/dev/null 2>&1; then
   echo "error creando worktree: $(echo "$create_json" | jq -r '.error.message')" >&2
   exit 1
@@ -109,7 +110,7 @@ full_prompt="${context_preamble}${prompt}"
 # The newly created pane may take a moment to be ready.
 started=0
 for attempt in 1 2 3 4 5; do
-  if herdr agent start "$task_id" --kind claude --pane "$pane" -- --permission-mode acceptEdits >/dev/null 2>&1; then
+  if herdr --session "$herdr_session" agent start "$task_id" --kind claude --pane "$pane" -- --permission-mode acceptEdits >/dev/null 2>&1; then
     started=1
     break
   fi
@@ -127,7 +128,7 @@ fi
 # not.
 prompted=0
 for attempt in 1 2 3 4 5; do
-  if herdr agent prompt "$pane" "$full_prompt" --wait --until working --timeout 5000 >/dev/null 2>&1; then
+  if herdr --session "$herdr_session" agent prompt "$pane" "$full_prompt" --wait --until working --timeout 5000 >/dev/null 2>&1; then
     prompted=1
     break
   fi
@@ -151,10 +152,12 @@ jq -n \
   --arg prompt "$prompt" \
   --arg context_preamble "$context_preamble" \
   --arg project_dir "$project_dir" \
+  --arg herdr_session "$herdr_session" \
   '{task_id: $task_id, repo: $repo, branch: $branch, worktree_path: $worktree_path,
     workspace_id: $workspace, pane_id: $pane, puppy_pane_id: $puppy_pane,
     status: "started", created_at: $created_at, prompt: $prompt,
-    context_preamble: $context_preamble, project_dir: $project_dir}' \
+    context_preamble: $context_preamble, project_dir: $project_dir,
+    herdr_session: $herdr_session}' \
   > "$task_file"
 
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id started pane=$pane worktree=$worktree_path" >> "$events_log"

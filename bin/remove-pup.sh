@@ -34,6 +34,9 @@ task_file=$(puppy_find_task "$task_id" "$all") || exit 1
 
 worktree_path=$(jq -r '.worktree_path' "$task_file")
 workspace=$(jq -r '.workspace_id' "$task_file")
+herdr_session=$(jq -r '.herdr_session // empty' "$task_file")
+session_args=()
+[[ -n "$herdr_session" ]] && session_args=(--session "$herdr_session")
 
 if [[ ! -d "$worktree_path" ]]; then
   echo "aviso: el path '$worktree_path' ya no existe; borro solo el registro de la tarea."
@@ -61,7 +64,7 @@ else
   fi
 fi
 
-remove_json=$(herdr worktree remove --workspace "$workspace" --json)
+remove_json=$(herdr "${session_args[@]}" worktree remove --workspace "$workspace" --json)
 if [[ $? -ne 0 ]] || echo "$remove_json" | jq -e '.error' >/dev/null 2>&1; then
   echo "error eliminando el worktree: $(echo "$remove_json" | jq -r '.error.message // "fallo desconocido"')" >&2
   echo "no se borró el registro de la tarea; podés reintentar o investigar." >&2

@@ -67,30 +67,49 @@ means several projects can each have their own concurrent puppy session,
 each with its own pup state (see "Persistent state" below).
 
 - `puppy start [project-dir] [--resume|--fresh]` — opens (or focuses) the
-  puppy session's herdr workspace for `project-dir`. If `project-dir` is
-  omitted from a real terminal (stdin and stdout both ttys), it shows an
-  interactive picker first: every known puppy session — open right now or
-  just with saved data on disk — each labeled with its verified status
-  ("abierto, vivo"; "abierto, sin proceso claude" for a workspace that
-  outlived its claude process; or "cerrado"), plus the option to type a
-  path for a new or existing project instead of picking a number. (If the
-  picked session's recorded path no longer exists on disk, it errors out
-  and points at `puppy forget --slug <slug>` instead of trying to open it.)
-  Outside a tty, or with an explicit `project-dir`, it operates directly on
-  that dir (default: the current directory), exactly as before. With no
-  `--resume`/`--fresh` flag, it then asks whether to resume a previous
-  session for that project if one exists (or, in non-interactive mode,
-  defaults to resume only when there's an actual workspace or saved
-  history to resume — otherwise it starts fresh). On a genuinely new
-  conversation (`--fresh` or a fresh answer, never on `--resume`), it sends
-  itself the message that makes it Puppy: read `AGENTS.md` and treat
-  `project-dir` as the active project for the session.
+  puppy session's herdr workspace for `project-dir`. Every project always
+  lives in its own dedicated, isolated herdr session, named `puppy-<slug>`
+  (see "Session isolation" below) — there is no way to opt out of this
+  per-invocation. If `project-dir` is omitted from a real terminal (stdin
+  and stdout both ttys), it shows an interactive picker first: every known
+  puppy session — open right now or just with saved data on disk — each
+  labeled with its verified status ("abierto, vivo"; "abierto, sin proceso
+  claude" for a workspace that outlived its claude process; or "cerrado"),
+  plus the option to type a path for a new or existing project instead of
+  picking a number. (If the picked session's recorded path no longer exists
+  on disk, it errors out and points at `puppy forget --slug <slug>` instead
+  of trying to open it.) Outside a tty, or with an explicit `project-dir`,
+  it operates directly on that dir (default: the current directory),
+  exactly as before. With no `--resume`/`--fresh` flag, it then asks
+  whether to resume a previous session for that project if one exists (or,
+  in non-interactive mode, defaults to resume only when there's an actual
+  workspace or saved history to resume — otherwise it starts fresh). On a
+  genuinely new conversation (`--fresh` or a fresh answer, never on
+  `--resume`), it sends itself the message that makes it Puppy: read
+  `AGENTS.md` and treat `project-dir` as the active project for the
+  session.
+- `puppy start --all` — a completely different mode from every other
+  `--all` in this document (see "Session isolation" below): it does no
+  project resolution at all, and instead just attaches the terminal to the
+  shared `default` herdr session — the one every project used before this
+  per-project isolation existed, where old orphaned sessions or manual
+  debugging panes may still live. Doesn't compose with a `project-dir`
+  (that's a usage error): use `puppy start <dir>` to open a specific
+  project in its own isolated session, or `puppy start --all` alone to peek
+  at the shared view.
 - `puppy stop [project-dir]` — kills the puppy process for `project-dir`
-  (default: the current directory) and closes its workspace. If called
-  with no argument from a real terminal, it shows the same kind of picker
-  as `start`, but restricted to sessions that are currently *open* (alive
-  or orphaned-workspace) — there's no point offering to stop something
-  that's already closed — instead of assuming the cwd.
+  (default: the current directory) and closes its workspace, in that
+  project's own dedicated herdr session. If called with no argument from a
+  real terminal, it shows the same kind of picker as `start`, but
+  restricted to sessions that are currently *open* (alive or
+  orphaned-workspace) — there's no point offering to stop something that's
+  already closed — instead of assuming the cwd. It never stops the
+  project's dedicated herdr *session* itself (`herdr session stop`), only
+  the workspace/claude process inside it — the session's own server
+  process is left running in the background afterwards. This is a deliberate,
+  accepted tradeoff (a minor idle resource, not a correctness issue): what
+  killing a session does to any pup panes still running inside it is
+  undocumented, so `puppy stop` doesn't risk it.
 - `bin/forget-project.sh [project-dir | --slug <slug>] [--path <dir>]
   [--force] [--yes] [--keep-history]` (`puppy forget`) — `puppy stop` +
   erase a session's saved puppy bookkeeping
@@ -177,6 +196,47 @@ each with its own pup state (see "Persistent state" below).
 - `puppy usage` — reports Claude Pro subscription usage (5-hour session
   window and 7-day weekly window), via `claude -p "/usage"`. `puppy ls`'s
   header also shows a compact version of this.
+
+## Session isolation
+
+Beyond the herdr *workspace* concept puppy already used (one workspace per
+project, labeled `puppy-<slug>`), herdr also has a separate concept of a
+named *session* (`herdr session list/attach/stop/delete`): each one is its
+own server process and its own Unix socket, so a client attached to one
+session structurally cannot see another session's workspaces or panes —
+real isolation, not just a naming convention. Every project's puppy
+workspace, and every pup spawned from within it, always lives in that
+project's own dedicated herdr session, named `puppy-<slug>` (the identical
+string already used as the workspace `--label` — safe to reuse, since
+`--label` and `--session` are separate namespaces in herdr). This is what
+makes `puppy start`'s attach show only that project's own workspace and
+pups, instead of every active project's, which is what you'd get from
+herdr's single implicit `default` session shared by everything that
+doesn't ask for a session of its own.
+
+**Important: `--all` means two different things depending on the
+command**, and it's easy to conflate them:
+- On `start`, `--all` means "skip project resolution entirely and attach to
+  the shared `default` session" — a view of whatever isn't in any
+  project's own isolated session (old pre-migration sessions, manual
+  debugging). It never combines with a `project-dir`.
+- On every other command that takes it (`status`, `tell`, `pr`, `rm`,
+  `supervise`, and the pup table in `ls`), `--all` means "widen the lookup
+  scope from just the active project's own data to every known project's" —
+  it has nothing to do with herdr sessions at all, it's about which
+  `~/.local/share/puppy/projects/<slug>/data/` directories to search (see
+  "Persistent state" below).
+
+Same flag name, unrelated meaning — read the command, not just the flag.
+
+A pup's task JSON records which herdr session its pane lives in
+(`herdr_session`, set by `spawn-pup.sh` from `puppy_herdr_session`, which
+reads it off the `PUPPY_HERDR_SESSION` env var herdr sets on the workspace
+at `puppy start` time). Commands that talk to a specific pup's pane
+(`tell`, `watch-pup.sh`, `remove-pup.sh`) read that field and target the
+right session; a task predating this field (no `herdr_session` recorded)
+falls back to the implicit `default` session, which is where it actually
+lives.
 
 ## Repos with their own agentic ecosystem (e.g. burmuin)
 
