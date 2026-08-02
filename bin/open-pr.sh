@@ -1,25 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# open-pr.sh <pup-id> [-- <extra gh pr create args>]
+# open-pr.sh <pup-id> [--all] [-- <extra gh pr create args>]
 #
 # Pushes the task's branch and opens a PR with `gh pr create`. Doesn't merge
 # anything directly: the default flow is PR, not direct merge. Saves the
 # PR URL in the pup's tasks/<pup-id>.json (see lib/project.sh).
+#
+# By default the pup is looked up only in the active project; --all searches
+# every project (see puppy_find_task in lib/project.sh). Everything after
+# the id (besides a leading --all) is opaque passthrough to `gh`, so --all
+# is only recognized immediately after the id, never by scanning the rest
+# of the arguments — otherwise a legitimate `gh` flag named --all could be
+# swallowed.
 
 if [[ $# -lt 1 ]]; then
-  echo "uso: open-pr.sh <pup-id> [-- <extra gh pr create args>]" >&2
+  echo "uso: open-pr.sh <pup-id> [--all] [-- <extra gh pr create args>]" >&2
   exit 1
 fi
 
 task_id=$1; shift
+all=""
+if [[ "${1:-}" == "--all" ]]; then
+  all="--all"
+  shift
+fi
 if [[ "${1:-}" == "--" ]]; then shift; fi
 extra_args=("$@")
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/lib/project.sh"
 
-task_file=$(puppy_find_task "$task_id") || exit 1
+task_file=$(puppy_find_task "$task_id" "$all") || exit 1
 
 worktree_path=$(jq -r '.worktree_path' "$task_file")
 branch=$(jq -r '.branch' "$task_file")

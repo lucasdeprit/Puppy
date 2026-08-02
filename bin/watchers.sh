@@ -11,6 +11,16 @@ set -euo pipefail
 #   2. A pup with status "started" whose recorded watcher_pid is no longer
 #      alive (the watcher died without updating the pup's state).
 #
+# Always global across every project, unlike the other pup-id commands:
+# orphan detection here is inherently machine-wide, not session-scoped. A
+# live watch-pup.sh is detected via pgrep (an OS process, with no notion of
+# "active project"), and a legitimate watcher for a pup in a DIFFERENT
+# project (relaunched via `tell --all`) would be misreported as orphaned if
+# this were scoped by default. Its two puppy_find_task calls below pass
+# "--all" explicitly since puppy_find_task's own default scope changed —
+# without it, orphan detection here would false-positive on every pup that
+# isn't in the active project.
+#
 # Compatible with bash 3.2 (macOS): doesn't use associative arrays.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +44,7 @@ results=()
 if [[ -n "$running_list" ]]; then
   while IFS=' ' read -r pid tid; do
     [[ -z "$pid" ]] && continue
-    if ! puppy_find_task "$tid" >/dev/null 2>&1; then
+    if ! puppy_find_task "$tid" --all >/dev/null 2>&1; then
       results+=("$(jq -n --arg pid "$pid" --arg task_id "$tid" --arg reason "no_task_file" \
         '{pid: ($pid|tonumber), task_id: $task_id, orphan: true, reason: $reason}')")
     fi
@@ -75,7 +85,7 @@ if [[ -z "$running_list" ]]; then
 else
   while IFS=' ' read -r pid tid; do
     [[ -z "$pid" ]] && continue
-    task_file=$(puppy_find_task "$tid" 2>/dev/null) || task_file=""
+    task_file=$(puppy_find_task "$tid" --all 2>/dev/null) || task_file=""
     if [[ -n "$task_file" ]]; then
       echo "  pid=$pid pup=$tid"
     else
