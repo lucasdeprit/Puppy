@@ -135,30 +135,45 @@ each with its own pup state (see "Persistent state" below).
 - `bin/watch-pup.sh <pup-id>` — normally not called by hand; `spawn-pup.sh`
   launches it. Waits for the pup to reach done/blocked/unknown, logs the
   event, and notifies the main puppy.
-- `bin/supervise.sh [pup-id ...]` (`puppy supervise`) — blocks (polling,
-  not with `wait -n`) until some given pup (or all that are still
-  "started") resolves.
-- `bin/open-pr.sh <pup-id> [-- <extra gh pr create args>]` (`puppy pr`)
-  — pushes the pup's branch and opens a PR with `gh`. Default flow for
-  landing changes.
-- `bin/remove-pup.sh <pup-id> [--force]` (`puppy rm`) — deletes a pup's
-  worktree, warning first if there's unsaved work. Only use it when
+- `bin/supervise.sh [--all] [pup-id ...]` (`puppy supervise`) — blocks
+  (polling, not with `wait -n`) until some given pup (or all that are still
+  "started") resolves. Scoped to the active project by default; `--all`
+  (auto-discovery of "started" pups, and validation of explicitly given
+  ids) covers every project instead. Explicitly given ids are validated
+  up front, before the polling loop starts, so an id that doesn't resolve
+  fails fast instead of hanging the loop forever.
+- `bin/open-pr.sh <pup-id> [--all] [-- <extra gh pr create args>]`
+  (`puppy pr`) — pushes the pup's branch and opens a PR with `gh`. Default
+  flow for landing changes. `--all` (only recognized immediately after
+  `<pup-id>`, never scanned out of the rest of the arguments, which are
+  opaque passthrough to `gh`) looks the pup up across every project instead
+  of just the active one.
+- `bin/remove-pup.sh <pup-id> [--force] [--all]` (`puppy rm`) — deletes a
+  pup's worktree, warning first if there's unsaved work. Only use it when
   there's an explicit decision to discard the branch (see rule 3 above).
-- `puppy ls` — first, every known puppy session (open right now, or closed
+  `--all` looks the pup up across every project instead of just the active
+  one.
+- `puppy ls [--all]` — first, every known puppy session (open right now, or closed
   but with saved data), each with an explicitly *verified* status —
   "vivo", "abierto sin proceso claude (huérfano)" for a workspace whose
   claude process died without closing it, or "cerrado" — rather than
   trusting herdr's raw `agent_status` (a workspace whose claude process is
   already dead can still report a misleading status there). Sessions with
   no recorded project
-  path are marked as such. Then the Pro subscription usage line, then the
-  table of registered pups.
-- `puppy status <pup-id>` — full metadata of one pup.
+  path are marked as such (this session list is always global, regardless
+  of `--all`). Then the Pro subscription usage line, then the table of
+  registered pups — scoped to the active project by default, `--all` to
+  see every project's pups.
+- `puppy status <pup-id> [--all]` — full metadata of one pup. `--all` looks
+  it up across every project instead of just the active one.
 - `puppy watchers` — lists live `watch-pup.sh` processes and detects
-  orphans.
-- `puppy tell <pup-id> <text>` — sends a follow-up instruction to a running
-  or idle pup via `herdr agent prompt`, looking up its pane from
-  `data/tasks/<pup-id>.json`.
+  orphans. Always global (see "Persistent state" below for why).
+- `puppy tell <pup-id> [--all] <text>` — sends a follow-up instruction to a
+  running or idle pup via `herdr agent prompt`, looking up its pane from
+  `data/tasks/<pup-id>.json`. `--all` (only recognized immediately after
+  `<pup-id>`, since the text itself is free-form and could contain the
+  literal string `--all`) looks the pup up across every project instead of
+  just the active one.
 - `puppy usage` — reports Claude Pro subscription usage (5-hour session
   window and 7-day weekly window), via `claude -p "/usage"`. `puppy ls`'s
   header also shows a compact version of this.
@@ -186,12 +201,22 @@ the active project's path (see `bin/lib/project.sh`):
   panes, prompt, status, and the `project_dir` it was spawned from.
 - `data/events.log` — append-only history of status changes.
 
-Because multiple projects can have concurrent puppy sessions, commands that
-operate on a specific pup (`status`, `tell`, `pr`, `rm`, `supervise`,
-`watchers`) look up `tasks/<pup-id>.json` across every project's data
-directory, not just the active one — a pup can be managed from a session
-other than the one that spawned it. `ls` and `watchers` are global views
-that aggregate across all projects for the same reason.
+Because multiple projects can have concurrent puppy sessions, a pup can in
+principle be managed from a session other than the one that spawned it —
+but by default, commands that operate on a specific pup (`status`, `tell`,
+`pr`, `rm`, `supervise`) only look up `tasks/<pup-id>.json` in the *active*
+project's data directory. Pass `--all` to any of them to search across
+every project's data directory instead, same as before this default
+changed. `ls`'s pup table follows the same rule (scoped by default, `--all`
+to see every project's pups); its session list at the top, and `watchers`,
+are unaffected by any of this and stay global views that always aggregate
+across all projects — the session list is bookkeeping about every puppy
+session on the machine, not a pup lookup, and `watchers` detects orphans in
+both directions (a live `watch-pup.sh` process found via `pgrep`, or a
+"started" pup whose recorded watcher died) which are inherently
+machine-wide: scoping either by default would misreport a legitimate
+watcher for another project's pup (e.g. one relaunched via `tell --all`) as
+orphaned.
 
 This bookkeeping is entirely separate from the *real* Claude Code
 conversation history for each project (transcripts, memory,

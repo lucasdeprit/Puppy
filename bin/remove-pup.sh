@@ -1,27 +1,36 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# remove-pup.sh <pup-id> [--force]
+# remove-pup.sh <pup-id> [--force] [--all]
 #
 # Helps (doesn't hard-block) delete a task's worktree. Warns if there are
 # uncommitted changes or unpushed commits; with --force deletes anyway.
 # This is a helper, not a technical lock: nothing stops calling
 # `herdr worktree remove` directly, the "don't delete without checking"
 # rule lives in AGENTS.md.
+#
+# By default the pup is looked up only in the active project; --all searches
+# every project (see puppy_find_task in lib/project.sh).
 
 if [[ $# -lt 1 ]]; then
-  echo "uso: remove-pup.sh <pup-id> [--force]" >&2
+  echo "uso: remove-pup.sh <pup-id> [--force] [--all]" >&2
   exit 1
 fi
 
-task_id=$1
+task_id=$1; shift
 force=0
-[[ "${2:-}" == "--force" ]] && force=1
+all=""
+for arg in "$@"; do
+  case "$arg" in
+    --force) force=1 ;;
+    --all) all="--all" ;;
+  esac
+done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/lib/project.sh"
 
-task_file=$(puppy_find_task "$task_id") || exit 1
+task_file=$(puppy_find_task "$task_id" "$all") || exit 1
 
 worktree_path=$(jq -r '.worktree_path' "$task_file")
 workspace=$(jq -r '.workspace_id' "$task_file")

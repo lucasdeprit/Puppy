@@ -159,7 +159,7 @@ jq -n \
 
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $task_id started pane=$pane worktree=$worktree_path" >> "$events_log"
 
-nohup "$script_dir/watch-pup.sh" "$task_id" >/dev/null 2>&1 &
+nohup "$script_dir/watch-pup.sh" "$task_id" "$data_dir" >/dev/null 2>&1 &
 watcher_pid=$!
 disown
 

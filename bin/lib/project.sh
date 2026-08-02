@@ -65,6 +65,19 @@ puppy_all_data_dirs() {
   done
 }
 
+# puppy_data_dirs_for_scope [--all] — one line per project data directory to
+# search: just the active project's (puppy_data_dir) by default, or every
+# known project's (puppy_all_data_dirs) with --all. Centralizes the
+# scope-vs-global choice so callers don't have to branch on it themselves.
+puppy_data_dirs_for_scope() {
+  local scope="${1:-}"
+  if [[ "$scope" == "--all" ]]; then
+    puppy_all_data_dirs
+  else
+    puppy_data_dir
+  fi
+}
+
 # puppy_all_projects — one line "<slug>\t<project-path-or-empty>" per known
 # project (one with a data dir on disk), regardless of whether it currently
 # has a herdr workspace open. Used by the `puppy start` picker and `puppy
@@ -321,12 +334,15 @@ puppy_pick_session() {
   echo "${slugs[$answer]}"
 }
 
-# puppy_find_task <pup-id> — searches tasks/<pup-id>.json across every
-# project's data directory and prints the matching path on stdout. A pup
-# can be managed (status/tell/rm/pr) from a session other than the one that
-# created it, so lookups by id are never scoped to just the current project.
+# puppy_find_task <pup-id> [scope] — searches tasks/<pup-id>.json and prints
+# the matching path on stdout. scope is empty (default: just the active
+# project, via puppy_data_dirs_for_scope) or the literal --all (every
+# project's data directory). A pup can still be managed (status/tell/rm/pr)
+# from a session other than the one that created it, but that now requires
+# passing --all explicitly instead of always searching every project.
 puppy_find_task() {
   local task_id="$1"
+  local scope="${2:-}"
   local d f
   while IFS= read -r d; do
     [[ -z "$d" ]] && continue
@@ -335,7 +351,11 @@ puppy_find_task() {
       echo "$f"
       return 0
     fi
-  done < <(puppy_all_data_dirs)
-  echo "error: no se encontró un pup con id '$task_id' en ningún proyecto" >&2
+  done < <(puppy_data_dirs_for_scope "$scope")
+  if [[ "$scope" == "--all" ]]; then
+    echo "error: no se encontró un pup con id '$task_id' en ningún proyecto" >&2
+  else
+    echo "error: no se encontró un pup con id '$task_id' en el proyecto activo ($(puppy_project_dir)); reintenta con --all para buscar en todos los proyectos" >&2
+  fi
   return 1
 }

@@ -1,24 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# watch-pup.sh <pup-id>
+# watch-pup.sh <pup-id> [data-dir]
 #
 # Meant to run in the background (spawn-pup.sh launches it, and 'puppy
 # tell' relaunches it after a follow-up). Blocks, waiting for pup <pup-id>
 # to reach done/blocked/unknown/idle, logs the event, and notifies the
 # main puppy by injecting a message into its own pane.
+#
+# data-dir, if given, is the caller's already-resolved project data
+# directory (spawn-pup.sh's own, or the one 'puppy tell' resolved via
+# puppy_find_task, possibly with --all for a pup in another project) — used
+# directly instead of re-resolving, since a re-lookup with the default
+# active-project scope could fail to find a task that a --all lookup just
+# found. With no data-dir (manual invocation), falls back to
+# puppy_find_task with the default scope (the active project only).
 
 if [[ $# -lt 1 ]]; then
-  echo "uso: watch-pup.sh <pup-id>" >&2
+  echo "uso: watch-pup.sh <pup-id> [data-dir]" >&2
   exit 1
 fi
 
 task_id=$1
+data_dir="${2:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/lib/project.sh"
 
-task_file=$(puppy_find_task "$task_id") || exit 1
-data_dir="$(dirname "$(dirname "$task_file")")"
+if [[ -n "$data_dir" ]]; then
+  task_file="$data_dir/tasks/$task_id.json"
+  if [[ ! -f "$task_file" ]]; then
+    echo "error: no se encontró '$task_file'" >&2
+    exit 1
+  fi
+else
+  task_file=$(puppy_find_task "$task_id") || exit 1
+  data_dir="$(dirname "$(dirname "$task_file")")"
+fi
 events_log="$data_dir/events.log"
 
 pane=$(jq -r '.pane_id' "$task_file")

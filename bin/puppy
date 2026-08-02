@@ -15,14 +15,19 @@ set -euo pipefail
 #   puppy start [project-dir] [--resume|--fresh]
 #   puppy stop [project-dir]
 #   puppy spawn <pup-id> <repo-path> <branch> <prompt...>
-#   puppy pr <pup-id> [-- <extra gh pr create args>]
-#   puppy rm <pup-id> [--force]
-#   puppy supervise [pup-id ...]
-#   puppy ls
-#   puppy status <pup-id>
+#   puppy pr <pup-id> [--all] [-- <extra gh pr create args>]
+#   puppy rm <pup-id> [--force] [--all]
+#   puppy supervise [--all] [pup-id ...]
+#   puppy ls [--all]
+#   puppy status <pup-id> [--all]
 #   puppy watchers
-#   puppy tell <pup-id> <text>
+#   puppy tell <pup-id> [--all] <text>
 #   puppy usage
+#
+# By default, commands that operate on a specific pup (status/tell/pr/rm/
+# supervise) and the pup table in `ls` only look in the active project's
+# data; pass --all to search across every project's (see "Persistent state"
+# in AGENTS.md).
 
 puppy_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 bin="$puppy_dir/bin"
@@ -330,6 +335,11 @@ case "$cmd" in
     exec "$bin/supervise.sh" "$@"
     ;;
   ls)
+    all=""
+    for arg in "$@"; do
+      [[ "$arg" == "--all" ]] && all="--all"
+    done
+
     all_panes=$(herdr pane list 2>/dev/null || echo '{}')
 
     session_lines=$(puppy_list_sessions)
@@ -392,10 +402,14 @@ case "$cmd" in
       for f in "$d"/tasks/*.json; do
         [[ -e "$f" ]] && task_files+=("$f")
       done
-    done < <(puppy_all_data_dirs)
+    done < <(puppy_data_dirs_for_scope "$all")
 
     if [[ ${#task_files[@]} -eq 0 ]]; then
-      echo "No hay pups registrados."
+      if [[ "$all" == "--all" ]]; then
+        echo "No hay pups registrados."
+      else
+        echo "No hay pups registrados en el proyecto activo. Usa 'puppy ls --all' para ver los de todos los proyectos."
+      fi
       exit 0
     fi
     printf "%-20s %-10s %-10s %-30s %-14s %-20s %s\n" "PUP" "ESTADO" "LIVE" "REPO#BRANCH" "PR" "PROYECTO" "PREVIEW"
@@ -421,10 +435,18 @@ case "$cmd" in
     ;;
   status)
     if [[ $# -lt 1 ]]; then
-      echo "uso: puppy status <pup-id>" >&2
+      echo "uso: puppy status <pup-id> [--all]" >&2
       exit 1
     fi
-    task_file=$(puppy_find_task "$1") || exit 1
+    pup_id=""
+    all=""
+    for arg in "$@"; do
+      case "$arg" in
+        --all) all="--all" ;;
+        *) pup_id="$arg" ;;
+      esac
+    done
+    task_file=$(puppy_find_task "$pup_id" "$all") || exit 1
     jq . "$task_file"
     ;;
   watchers)
@@ -432,11 +454,21 @@ case "$cmd" in
     ;;
   tell)
     if [[ $# -lt 2 ]]; then
-      echo "uso: puppy tell <pup-id> <text>" >&2
+      echo "uso: puppy tell <pup-id> [--all] <text>" >&2
       exit 1
     fi
     pup_id=$1; shift
-    task_file=$(puppy_find_task "$pup_id") || exit 1
+    all=""
+    if [[ "${1:-}" == "--all" ]]; then
+      all="--all"
+      shift
+    fi
+    if [[ $# -lt 1 ]]; then
+      echo "uso: puppy tell <pup-id> [--all] <text>" >&2
+      exit 1
+    fi
+    task_file=$(puppy_find_task "$pup_id" "$all") || exit 1
+    data_dir="$(dirname "$(dirname "$task_file")")"
     pane_id=$(jq -r '.pane_id // empty' "$task_file")
     if [[ -z "$pane_id" ]]; then
       echo "error: no hay pane_id registrado para '$pup_id'" >&2
@@ -466,7 +498,7 @@ case "$cmd" in
     if [[ -n "$watcher_pid" ]] && kill -0 "$watcher_pid" 2>/dev/null; then
       echo "Mensaje enviado a '$pup_id'; ya hay un watcher vivo (pid=$watcher_pid)."
     else
-      nohup "$bin/watch-pup.sh" "$pup_id" >/dev/null 2>&1 &
+      nohup "$bin/watch-pup.sh" "$pup_id" "$data_dir" >/dev/null 2>&1 &
       new_watcher_pid=$!
       disown
 
@@ -498,14 +530,18 @@ comandos:
                                                        events.log, todo. Avisa si hay pups sin
                                                        terminar (ni done ni merged)
   spawn <pup-id> <repo-path> <branch> <prompt...>   lanza un pup (worktree + worker)
-  pr <pup-id> [-- args de gh pr create]             pushea y abre PR
-  rm <pup-id> [--force]                             borra worktree + registro del pup
-  supervise [pup-id ...]                             espera (sondeo) a que resuelva algún pup
-  ls                                                  lista pups registrados + estado de la sesión de puppy
-  status <pup-id>                                     muestra la metadata completa de un pup
+  pr <pup-id> [--all] [-- args de gh pr create]     pushea y abre PR
+  rm <pup-id> [--force] [--all]                     borra worktree + registro del pup
+  supervise [--all] [pup-id ...]                     espera (sondeo) a que resuelva algún pup
+  ls [--all]                                          lista pups registrados + estado de la sesión de puppy
+  status <pup-id> [--all]                             muestra la metadata completa de un pup
   watchers                                            lista watch-pup.sh vivos y detecta huérfanos
-  tell <pup-id> <text>                                envía una instrucción de seguimiento a un pup en marcha
+  tell <pup-id> [--all] <text>                        envía una instrucción de seguimiento a un pup en marcha
   usage                                                muestra el uso de la suscripción Claude Pro (5h/7d)
+
+  Por defecto, los comandos que operan sobre un pup concreto (status, tell,
+  pr, rm, supervise) y la tabla de pups de 'ls' solo buscan en el proyecto
+  activo de esta sesión; usa --all para buscar en todos los proyectos.
 EOF
     exit 1
     ;;
