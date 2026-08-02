@@ -29,57 +29,51 @@ bin="$puppy_dir/bin"
 source "$bin/lib/project.sh"
 
 # puppy_pick_project_dir — interactive picker for `puppy start` when it's
-# called with no project-dir argument from a real terminal. Lists both the
-# currently open puppy-* workspaces (via herdr) and the known projects with
-# saved data but no workspace open right now, numbered, and lets the user
-# either pick one by number or type a path to open/create a new project.
-# Prints the chosen absolute project dir on stdout; all prompts/listing go to
-# stderr so this composes with `project_dir=$(puppy_pick_project_dir)`.
+# called with no project-dir argument from a real terminal. Lists every known
+# puppy session (via puppy_list_sessions — open now or just with saved data),
+# numbered, and lets the user either pick one by number or type a path to
+# open/create a new project. That "type a free path" option is specific to
+# `puppy start` (you can always open/create a project by path), so this stays
+# its own function rather than a thin wrapper over puppy_pick_session, which
+# doesn't offer it. Prints the chosen absolute project dir on stdout; all
+# prompts/listing go to stderr so this composes with
+# `project_dir=$(puppy_pick_project_dir)`.
 puppy_pick_project_dir() {
-  local all_panes ws_lines
+  local -a slugs=()
   local -a paths=()
-  local -a open_slugs=()
   local idx=1
 
-  all_panes=$(herdr pane list 2>/dev/null || echo '{}')
-  ws_lines=$(herdr workspace list 2>/dev/null | jq -c '.result.workspaces[]? | select(.label | test("^puppy-"))')
-
   echo "Sesiones de Puppy conocidas:" >&2
-  if [[ -n "$ws_lines" ]]; then
-    while IFS= read -r ws; do
-      [[ -z "$ws" ]] && continue
-      local ws_id label cwd pane_info status slug
-      ws_id=$(echo "$ws" | jq -r '.workspace_id')
-      label=$(echo "$ws" | jq -r '.label')
-      cwd=$(echo "$ws" | jq -r '.worktree.checkout_path // empty')
-      pane_info=$(echo "$all_panes" | jq -c --arg w "$ws_id" '.result.panes[]? | select(.workspace_id==$w)' | head -1)
-      status=$(echo "$pane_info" | jq -r '.agent_status // "unknown"' 2>/dev/null)
-      slug="${label#puppy-}"
-      open_slugs+=("$slug")
-      paths[$idx]="$cwd"
-      printf "  %d) [abierto, %s] %s%s\n" "$idx" "$status" "$label" "${cwd:+ — $cwd}" >&2
-      idx=$((idx + 1))
-    done <<< "$ws_lines"
-  fi
 
-  local proj
-  while IFS= read -r proj; do
-    [[ -z "$proj" ]] && continue
-    local slug path already_open=0 s
-    slug="${proj%%$'\t'*}"
-    path="${proj#*$'\t'}"
-    for s in "${open_slugs[@]:-}"; do
-      [[ "$s" == "$slug" ]] && already_open=1 && break
-    done
-    [[ "$already_open" -eq 1 ]] && continue
+  local line rest slug path ws_id alive has_history status_txt
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    rest="$line"
+    slug="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    path="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    ws_id="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    alive="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    has_history="$rest"
+
+    if [[ -n "$ws_id" ]]; then
+      if [[ "$alive" == "1" ]]; then
+        status_txt="abierto, vivo"
+      else
+        status_txt="abierto, sin proceso claude"
+      fi
+    else
+      status_txt="cerrado"
+    fi
+
+    slugs[$idx]="$slug"
     paths[$idx]="$path"
     if [[ -n "$path" ]]; then
-      printf "  %d) [cerrado] %s\n" "$idx" "$path" >&2
+      printf "  %d) [%s] %s — %s\n" "$idx" "$status_txt" "$slug" "$path" >&2
     else
-      printf "  %d) [cerrado] (ruta desconocida, slug %s)\n" "$idx" "$slug" >&2
+      printf "  %d) [%s] %s (ruta desconocida)\n" "$idx" "$status_txt" "$slug" >&2
     fi
     idx=$((idx + 1))
-  done < <(puppy_all_projects)
+  done < <(puppy_list_sessions)
 
   if [[ "$idx" -eq 1 ]]; then
     echo "  (ninguna todavía)" >&2
@@ -97,6 +91,10 @@ puppy_pick_project_dir() {
     chosen="${paths[$answer]}"
     if [[ -z "$chosen" ]]; then
       echo "error: no se conoce la ruta original de esa sesión; abrila pasándole el directorio directamente a 'puppy start <dir>'." >&2
+      return 1
+    fi
+    if [[ ! -d "$chosen" ]]; then
+      echo "error: esa sesión ya no tiene una ruta válida en disco ($chosen no existe); usá 'puppy forget --slug ${slugs[$answer]}' si querés olvidarla." >&2
       return 1
     fi
     (cd "$chosen" && pwd -P)
@@ -291,13 +289,17 @@ case "$cmd" in
     fi
     ;;
   stop)
-    project_dir="$(cd "${1:-$PWD}" && pwd -P)"
-    slug=$(puppy_project_slug "$project_dir")
+    if [[ $# -eq 0 && -t 0 && -t 1 ]]; then
+      slug=$(puppy_pick_session --open) || exit 1
+    else
+      project_dir="$(cd "${1:-$PWD}" && pwd -P)"
+      slug=$(puppy_project_slug "$project_dir")
+    fi
     label="puppy-$slug"
 
     existing_ws=$(puppy_find_workspace_by_label "$label")
     if [[ -z "$existing_ws" ]]; then
-      echo "No hay sesión de Puppy abierta para $project_dir."
+      echo "No hay sesión de Puppy abierta para ${project_dir:-$slug}."
       exit 0
     fi
 
@@ -330,20 +332,39 @@ case "$cmd" in
   ls)
     all_panes=$(herdr pane list 2>/dev/null || echo '{}')
 
-    ws_lines=$(herdr workspace list 2>/dev/null | jq -c '.result.workspaces[]? | select(.label | test("^puppy-"))')
-    if [[ -z "$ws_lines" ]]; then
-      echo "Puppy: cerrado (sin workspace abierto)"
+    session_lines=$(puppy_list_sessions)
+    if [[ -z "$session_lines" ]]; then
+      echo "No hay ninguna sesión de Puppy conocida."
     else
-      while IFS= read -r ws; do
-        [[ -z "$ws" ]] && continue
-        ws_id=$(echo "$ws" | jq -r '.workspace_id')
-        label=$(echo "$ws" | jq -r '.label')
-        cwd=$(echo "$ws" | jq -r '.worktree.checkout_path // empty')
-        pane_info=$(echo "$all_panes" | jq -c --arg w "$ws_id" '.result.panes[]? | select(.workspace_id==$w)' | head -1)
-        live=$(echo "$pane_info" | jq -r '.agent_status // "unknown"' 2>/dev/null)
-        preview=$(echo "$pane_info" | jq -r '.terminal_title_stripped // empty' 2>/dev/null)
-        echo "Puppy [$label]: ${live:-unknown} (workspace $ws_id)${cwd:+ — $cwd}${preview:+ — \"$preview\"}"
-      done <<< "$ws_lines"
+      while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        rest="$line"
+        slug="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+        path="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+        ws_id="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+        alive="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+        has_history="$rest"
+
+        if [[ -n "$ws_id" ]]; then
+          if [[ "$alive" == "1" ]]; then
+            estado="vivo"
+          else
+            estado="abierto sin proceso claude (huérfano)"
+          fi
+          pane_info=$(echo "$all_panes" | jq -c --arg w "$ws_id" '.result.panes[]? | select(.workspace_id==$w)' | head -1)
+          preview=$(echo "$pane_info" | jq -r '.terminal_title_stripped // empty' 2>/dev/null)
+        else
+          estado="cerrado"
+          preview=""
+        fi
+
+        if [[ -n "$path" ]]; then
+          ruta_txt=" — $path"
+        else
+          ruta_txt=" (sin ruta conocida)"
+        fi
+        echo "Puppy [$slug]: $estado$ruta_txt${preview:+ — \"$preview\"}"
+      done <<< "$session_lines"
     fi
 
     usage_line=$("$bin/usage.sh" --pct 2>/dev/null || echo "|||")
@@ -469,7 +490,9 @@ comandos:
                                                        guardados) para elegir una o dar una ruta nueva; sin flag
                                                        pregunta si hay sesión previa de ese proyecto que reanudar
   stop [project-dir]                                   termina el proceso de puppy del proyecto dado
-                                                       (por defecto el cwd) y cierra su workspace
+                                                       (por defecto el cwd) y cierra su workspace; sin
+                                                       project-dir y en una terminal interactiva, muestra
+                                                       un picker con las sesiones abiertas para elegir cuál
   forget [project-dir] [--force]                       stop + borra todos los datos guardados del
                                                        proyecto dado (por defecto el cwd): tasks,
                                                        events.log, todo. Avisa si hay pups sin
