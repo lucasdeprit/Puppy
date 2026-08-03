@@ -13,7 +13,7 @@ set -euo pipefail
 #
 # usage:
 #   puppy start [project-dir] [--resume|--fresh]
-#   puppy start --all
+#   puppy start --default
 #   puppy stop [project-dir]
 #   puppy spawn <pup-id> <repo-path> <branch> <prompt...>
 #   puppy pr <pup-id> [--all] [-- <extra gh pr create args>]
@@ -127,25 +127,25 @@ case "$cmd" in
   start)
     mode=""
     project_arg=""
-    all_mode=0
+    default_mode=0
     for arg in "$@"; do
       case "$arg" in
         --fresh) mode="fresh" ;;
         --resume) mode="resume" ;;
-        --all) all_mode=1 ;;
+        --default) default_mode=1 ;;
         --*) echo "error: opción desconocida '$arg'" >&2; exit 1 ;;
         *) project_arg="$arg" ;;
       esac
     done
 
-    # `puppy start --all` is a different mode entirely, not a project: just
+    # `puppy start --default` is a different mode entirely, not a project: just
     # attach to the shared "default" herdr session (where anything from
     # before this per-project isolation, or manual debugging, would live),
     # with no project resolution at all. It doesn't compose with a
     # project-dir — those are two different requests.
-    if [[ "$all_mode" -eq 1 ]]; then
+    if [[ "$default_mode" -eq 1 ]]; then
       if [[ -n "$project_arg" ]]; then
-        echo "error: --all no se puede combinar con un project-dir; usá puppy start <dir> para abrir ese proyecto en su sesión aislada, o puppy start --all solo para ver la vista compartida." >&2
+        echo "error: --default no se puede combinar con un project-dir; usá puppy start <dir> para abrir ese proyecto en su sesión aislada, o puppy start --default solo para ver la vista compartida." >&2
         exit 1
       fi
       if [[ -n "${HERDR_ENV:-}" ]]; then
@@ -587,11 +587,12 @@ comandos:
                                                        sesiones conocidas (abiertas o con datos guardados) para
                                                        elegir una o dar una ruta nueva; sin flag pregunta si hay
                                                        sesión previa de ese proyecto que reanudar
-  start --all                                          NO abre ningún proyecto: adjunta la terminal a la sesión
+  start --default                                       NO abre ningún proyecto: adjunta la terminal a la sesión
                                                        herdr compartida "default" (para ver sesiones viejas
                                                        previas a este aislamiento, o depurar a mano). Distinto del
-                                                       --all de status/tell/pr/rm/supervise/ls (ver más abajo); no
-                                                       se puede combinar con un project-dir
+                                                       --all de status/tell/pr/rm/supervise/ls (ver más abajo), que
+                                                       sigue siendo --all y no cambia; --default no se puede
+                                                       combinar con un project-dir
   stop [project-dir]                                   termina el proceso de puppy del proyecto dado
                                                        (por defecto el cwd) y cierra su workspace; sin
                                                        project-dir y en una terminal interactiva, muestra
