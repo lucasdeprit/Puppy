@@ -88,14 +88,14 @@ each with its own pup state (see "Persistent state" below).
   `--resume`), it sends itself the message that makes it Puppy: read
   `AGENTS.md` and treat `project-dir` as the active project for the
   session.
-- `puppy start --all` — a completely different mode from every other
+- `puppy start --default` — a completely different mode from every other
   `--all` in this document (see "Session isolation" below): it does no
   project resolution at all, and instead just attaches the terminal to the
   shared `default` herdr session — the one every project used before this
   per-project isolation existed, where old orphaned sessions or manual
   debugging panes may still live. Doesn't compose with a `project-dir`
   (that's a usage error): use `puppy start <dir>` to open a specific
-  project in its own isolated session, or `puppy start --all` alone to peek
+  project in its own isolated session, or `puppy start --default` alone to peek
   at the shared view.
 - `puppy stop [project-dir]` — kills the puppy process for `project-dir`
   (default: the current directory) and closes its workspace, in that
@@ -214,9 +214,9 @@ pups, instead of every active project's, which is what you'd get from
 herdr's single implicit `default` session shared by everything that
 doesn't ask for a session of its own.
 
-**Important: `--all` means two different things depending on the
-command**, and it's easy to conflate them:
-- On `start`, `--all` means "skip project resolution entirely and attach to
+**Important: `start --default` and `--all` mean two different things**, and
+it's easy to conflate them:
+- On `start`, `--default` means "skip project resolution entirely and attach to
   the shared `default` session" — a view of whatever isn't in any
   project's own isolated session (old pre-migration sessions, manual
   debugging). It never combines with a `project-dir`.
